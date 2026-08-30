@@ -28,7 +28,7 @@ function idsEqual(left, right) {
 export function normalizeWarehouseState(source, version) {
   if (source?.warehouses?.byId && Array.isArray(source?.warehouses?.order)) {
     const byId = Object.fromEntries(Object.entries(source.warehouses.byId).map(([id, warehouse]) => {
-      const { iconDataUrl: _iconDataUrl, ...metadata } = warehouse;
+      const { iconDataUrl: _iconDataUrl, tempLimit: _tempLimit, ...metadata } = warehouse;
       return [id, metadata];
     }));
     return {
@@ -40,7 +40,7 @@ export function normalizeWarehouseState(source, version) {
       },
       documents: { byWarehouseId: { ...(source.documents?.byWarehouseId || {}) } },
       shelves: { byWarehouseId: { ...(source.shelves?.byWarehouseId || {}) } },
-      pinecones: { byWarehouseId: { ...(source.pinecones?.byWarehouseId || {}) } },
+      pinecones: { byWarehouseId: Object.fromEntries(Object.entries(source.pinecones?.byWarehouseId || {}).map(([id, pinecones]) => [id, stripObsoletePineconeFields(pinecones)])) },
     };
   }
 
@@ -58,12 +58,11 @@ export function normalizeWarehouseState(source, version) {
       id: warehouse.id,
       name: warehouse.name || "未命名松鼠仓",
       updatedAt: warehouse.updatedAt || "",
-      tempLimit: warehouse.tempLimit || 5,
     };
     order.push(warehouse.id);
     documentsByWarehouseId[warehouse.id] = structuredClone(reviewDocument || { title: warehouse.name || "未命名松鼠仓", sections: [] });
     shelvesByWarehouseId[warehouse.id] = structuredClone(Array.isArray(shelves) ? shelves : []);
-    pineconesByWarehouseId[warehouse.id] = structuredClone(Array.isArray(pinecones) ? pinecones : []);
+    pineconesByWarehouseId[warehouse.id] = stripObsoletePineconeFields(pinecones);
   });
 
   const activeWarehouseId = byId[source?.activeWarehouseId]
@@ -102,11 +101,23 @@ export function applyDocumentEdit(warehouse, edit, value) {
   return next;
 }
 
-export function togglePineconeFeatured(warehouse, pineconeId) {
+export function applyPineconeEdits(warehouse, edits) {
+  const invalidIds = edits.filter(({ content }) => !content.trim()).map(({ id }) => id);
+  if (invalidIds.length) return { warehouse, invalidIds };
+
+  const contentById = new Map(edits.map(({ id, content }) => [id, content.trim()]));
   const next = structuredClone(warehouse);
-  const pinecone = next.pinecones?.find(({ id }) => id === pineconeId);
-  if (pinecone) pinecone.isFeatured = !pinecone.isFeatured;
-  return next;
+  for (const pinecone of next.pinecones || []) {
+    if (contentById.has(pinecone.id)) pinecone.content = contentById.get(pinecone.id);
+  }
+  return { warehouse: next, invalidIds: [] };
+}
+
+function stripObsoletePineconeFields(pinecones) {
+  return (Array.isArray(pinecones) ? pinecones : []).map((pinecone) => {
+    const { isFeatured: _isFeatured, ...current } = pinecone;
+    return structuredClone(current);
+  });
 }
 
 export function deriveShelfSections(warehouse) {
@@ -127,8 +138,8 @@ export function isWarehouseReadOnly(organizingWarehouseId, warehouseId) {
   return Boolean(organizingWarehouseId) && organizingWarehouseId === warehouseId;
 }
 
-export function canStartWarehouseOrganization(organizingWarehouseId) {
-  return !organizingWarehouseId;
+export function canStartWarehouseOrganization(organizingWarehouseId, warehouse) {
+  return !organizingWarehouseId && Boolean(warehouse?.pinecones?.some(({ status }) => status === "temp"));
 }
 
 export function getWarehouseRecords(state) {
@@ -188,7 +199,7 @@ export function useOnlyExampleWarehouses(state, examples, collectionVersion) {
 
 export function createEmptyWarehouseRecord(id, name, updatedAt) {
   return {
-    warehouse: { id, name, updatedAt, tempLimit: 5 },
+    warehouse: { id, name, updatedAt },
     document: {
       title: name,
       sections: [{

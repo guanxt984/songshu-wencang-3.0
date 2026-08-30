@@ -14,8 +14,8 @@ const expectations = [
   ["review document", "复盘文档"],
   ["pinecone shelf", "松果架"],
   ["shelf drawer search", "搜索松果"],
-  ["pinecone edit action", "编辑"],
-  ["pinecone delete action", "删除"],
+  ["shelf add action", "data-action=\"open-shelf-add\""],
+  ["shelf management action", "data-action=\"toggle-shelf-management\""],
   ["toolbar edit action", "toggle-document-edit"],
   ["toolbar add action", "toggle-add"],
   ["toolbar reorganize action", "reorganize"],
@@ -29,9 +29,10 @@ const expectations = [
   ["document save handler", "saveDocumentEdits"],
   ["document corner tools", "document-corner-tools"],
   ["toolbar save document copy", "保存文档"],
-  ["toolbar full reorganize copy", "全部重新整理"],
+  ["merge organization mode", "保持当前分区"],
+  ["rebuild organization mode", "全部重新整理"],
   ["reorganize replacement warning", "当前文档中的人工修改将在整理成功后被替换"],
-  ["reorganize targets captured warehouse", "organizeWarehouse(warehouseId)"],
+  ["reorganize targets captured warehouse and mode", "organizeWarehouse(warehouseId, mode)"],
   ["modal makes background inert", '${state.warehouseDialog ? "inert" : ""}'],
   ["approved warehouse icon", "pinecone-warehouse-icon.png"],
   ["warehouse name color", "getWarehouseColor"],
@@ -61,11 +62,13 @@ const expectations = [
   ["warehouse dialog delete action", "data-action=\"confirm-delete-warehouse\""],
   ["shelf rows follow document sections", "warehouse.reviewDocument.sections.map"],
   ["temporary shelf appears in rack", "isTemporary: true"],
-  ["shelf title icon", "shelf-title-icon"],
-  ["shelf title row folds drawer", "class=\"shelf-title-row\" data-action=\"toggle-shelf\""],
+  ["shelf compact tool row", "shelf-tool-row"],
   ["flat shelf section row", '<section class="shelf-section'],
   ["small shelf count", "shelf-count"],
-  ["featured pinecone action", "toggle-featured"],
+  ["pinecone management textarea", "data-input=\"pinecone-manage\""],
+  ["pinecone top delete action", "pinecone-delete-button"],
+  ["pinecone management draft", "pineconeDrafts"],
+  ["management save before reorganization", "saveAllManagedPinecones"],
   ["toc jump action", "jumpToSection"],
   ["toc buttons carry section index", "data-action=\"jump-section\""],
 ];
@@ -99,11 +102,10 @@ const cssExpectations = [
   ["compact shelf rows", ".shelf-rack-body"],
   ["small shelf count type", ".shelf-count"],
   ["spacious shelf rack", "Spacious pinecone rack"],
-  ["shelf modify button style", ".shelf-modify-button"],
-  ["pinecone action panel style", ".pinecone-action-panel"],
+  ["shelf tool row style", ".shelf-tool-row"],
+  ["pinecone delete button style", ".pinecone-delete-button"],
   ["masonry pinecone layout", "column-count: 2"],
   ["natural pinecone height", "break-inside: avoid"],
-  ["small shelf title icon style", ".shelf-title-icon"],
   ["expanded shelf tab style is state scoped", ".shelf-drawer.open .shelf-tab"],
   ["expanded shelf tab icon style is state scoped", ".shelf-drawer.open .drawer-shelf-icon"],
   ["collapsed shelf keeps only tag visible", "transform: translateX(0)"],
@@ -184,6 +186,11 @@ const forbidden = [
   ["obsolete toolbar tab", "document-toolbar-tab"],
   ["obsolete document search", "doc-search"],
   ["obsolete featured action", "aria-label=\"精选\""],
+  ["featured handler", "toggle-featured"],
+  ["featured counter", "颗精选松果"],
+  ["shelf title row", "shelf-title-row"],
+  ["pinecone bottom action panel", "pinecone-action-panel"],
+  ["temporary quantity limit", "tempLimit"],
   ["obsolete more action", "aria-label=\"更多\""],
 ];
 
@@ -213,7 +220,7 @@ if (emptyWarehouseSource.includes('class="toast')) {
 
 const warehouseDialogSource = appSource.slice(
   appSource.indexOf("function renderWarehouseDialog()"),
-  appSource.indexOf("function renderTemporaryShelfNotice("),
+  appSource.indexOf("function renderReviewDocument("),
 );
 const warehouseDialogFailures = [];
 [
@@ -267,7 +274,7 @@ if (/\.toolbar-img[^}]*transform\s*:(?!\s*none\b)/s.test(cssSource)) {
 }
 const toggleShelfSource = appSource.slice(
   appSource.indexOf('if (action === "toggle-shelf")'),
-  appSource.indexOf('if (action === "add-pinecone")'),
+  appSource.indexOf('if (action === "open-shelf-add")'),
 );
 if (!toggleShelfSource.includes("event.stopPropagation()")) {
   toolbarFailures.push("Shelf toggle can still bubble and cancel itself");

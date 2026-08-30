@@ -1,4 +1,4 @@
-import { applyDocumentEdit, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hydrateWarehouseRecord, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, togglePineconeFeatured, useOnlyExampleWarehouses } from "./warehouse-management.js";
+import { applyDocumentEdit, applyPineconeEdits, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hydrateWarehouseRecord, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, useOnlyExampleWarehouses } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 import { organizeWarehouseLocally } from "./organizer.js";
 
@@ -40,7 +40,6 @@ const initialState = {
   editMode: false,
   newPineconeText: "",
   shelfQuery: "",
-  editingPineconeId: null,
   documentDraft: null,
   organizingWarehouseId: null,
   referenceIds: [],
@@ -53,7 +52,6 @@ const initialState = {
       id: "interview",
       name: "面试经验整理",
       updatedAt: "今天 10:30 更新",
-      tempLimit: 5,
       pinecones: [
         { id: "p1", content: "项目经历要写清楚背景、行动和结果，不要只堆技术名词。", status: "shelved", shelfId: "resume", tags: ["重点"], isFeatured: true, createdAt: "07-12 09:41" },
         { id: "p2", content: "简历内容要围绕目标岗位展开，减少无关经历。", status: "shelved", shelfId: "resume", tags: ["可执行"], isFeatured: true, createdAt: "07-12 08:22" },
@@ -183,7 +181,6 @@ function makeWarehouse(id, name, updatedAt, contents) {
     id,
     name,
     updatedAt,
-    tempLimit: 5,
     pinecones,
     shelves: [
       { id: "main", name: name.includes("摘抄") ? "核心观点" : "主要线索", description: "最适合放入复盘文档的内容。" },
@@ -224,7 +221,8 @@ function resetTransientState(nextState) {
     referenceIds: [],
     newPineconeText: "",
     shelfQuery: "",
-    editingPineconeId: null,
+    pineconeDrafts: {},
+    shelfManaging: false,
     documentDraft: null,
     organizingWarehouseId: null,
     warehouseDialog: null,
@@ -239,6 +237,8 @@ function saveState() {
     documentDraft: _documentDraft,
     organizingWarehouseId: _organizingWarehouseId,
     warehouseDialog: _warehouseDialog,
+    shelfManaging: _shelfManaging,
+    pineconeDrafts: _pineconeDrafts,
     ...persisted
   } = state;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
@@ -273,7 +273,6 @@ function render() {
   }
 
   const tempCount = warehouse.pinecones.filter((pinecone) => pinecone.status === "temp").length;
-  const featuredCount = warehouse.pinecones.filter((pinecone) => pinecone.isFeatured).length;
 
   app.innerHTML = `
     <section class="page-shell" ${state.warehouseDialog ? "inert" : ""}>
@@ -309,13 +308,10 @@ function render() {
             ${renderToolbar()}
             <div class="chips">
               <span>${icons.book("chip-img")} ${warehouse.reviewDocument.sections.length} 个章节</span>
-              <span>${icons.star("chip-img")} ${featuredCount} 颗精选松果</span>
               <span><b class="clock-dot"></b>${escapeHtml(warehouse.updatedAt)}</span>
-              <span class="${tempCount >= warehouse.tempLimit ? "chip-hot" : ""}">暂存栏 ${tempCount}/${warehouse.tempLimit}</span>
+              <span>暂存栏 ${tempCount} 颗</span>
             </div>
           </header>
-
-          ${tempCount >= warehouse.tempLimit ? renderTemporaryShelfNotice(tempCount) : ""}
 
           <div class="content-wrap">
             <nav class="toc" aria-label="目录">
@@ -400,12 +396,14 @@ function renderShelfIcon(className) {
 
 function renderToolbar() {
   const readOnly = isActiveWarehouseOrganizing();
+  const warehouse = getActiveWarehouse();
+  const canOrganize = canStartWarehouseOrganization(state.organizingWarehouseId, warehouse);
   return `
     <img class="document-mascot" src="assets/illustrations/squirrel-toolbar-perched-v2.png" alt="" aria-hidden="true">
     <nav class="document-corner-tools" aria-label="文档工具" data-toolbar>
       <button class="corner-tool" type="button" data-action="toggle-add" aria-label="添加松果" title="添加松果" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.plus("toolbar-img add")}</span><span class="corner-tool-label">添加松果</span></button>
       <button class="corner-tool" type="button" data-action="toggle-document-edit" aria-label="${state.editMode ? "保存文档" : "编辑文档"}" title="${state.editMode ? "保存文档" : "编辑文档"}" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.book("toolbar-img")}</span><span class="corner-tool-label">${state.editMode ? "保存文档" : "编辑文档"}</span></button>
-      <button class="corner-tool" type="button" data-action="reorganize" aria-label="全部重新整理" title="全部重新整理" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.leaf("toolbar-img")}</span><span class="corner-tool-label">${readOnly ? "整理中" : "重新整理"}</span></button>
+      <button class="corner-tool" type="button" data-action="reorganize" aria-label="重新整理" title="${canOrganize ? "重新整理" : "添加松果后可整理"}" ${canOrganize ? "" : "disabled"}><span class="toolbar-icon-box">${icons.leaf("toolbar-img")}</span><span class="corner-tool-label">${readOnly ? "整理中" : "重新整理"}</span></button>
     </nav>
   `;
 }
@@ -422,13 +420,23 @@ function renderWarehouseDialog() {
     <div class="modal-backdrop warehouse-dialog-backdrop">
       <section class="warehouse-dialog" role="dialog" aria-modal="true" aria-labelledby="warehouse-dialog-title">
         <header>
-          <h3 id="warehouse-dialog-title">${isCreate ? "新建松果仓" : isReorganize ? "全部重新整理" : "删除松果仓"}</h3>
+          <h3 id="warehouse-dialog-title">${isCreate ? "新建松果仓" : isReorganize ? "选择整理方式" : "删除松果仓"}</h3>
         </header>
         ${isCreate ? `
           <label for="warehouse-name-input">松果仓名称</label>
           <input id="warehouse-name-input" type="text" data-input="warehouse-name" autocomplete="off" required>
         ` : isReorganize ? `
-          <p>将使用仓库中的全部松果重新生成文档和松果架。当前文档中的人工修改将在整理成功后被替换。整理期间该仓库进入只读状态。</p>
+          <fieldset class="organize-mode-options">
+            <legend>如何处理暂存栏中的松果？</legend>
+            <label class="organize-mode-option">
+              <input type="radio" name="organize-mode" value="merge" checked>
+              <span><strong>保持当前分区</strong><small>把暂存松果并入已有文档；保留现有修改和批注，仅在需要时新增分区。</small></span>
+            </label>
+            <label class="organize-mode-option danger-mode">
+              <input type="radio" name="organize-mode" value="rebuild">
+              <span><strong>全部重新整理</strong><small>使用全部松果重建文档。当前文档中的人工修改将在整理成功后被替换。</small></span>
+            </label>
+          </fieldset>
         ` : `
           <p>确定删除“${escapeHtml(warehouse.name)}”吗？仓内松果和整理文档会一并删除。</p>
         `}
@@ -441,16 +449,6 @@ function renderWarehouseDialog() {
               : '<button class="primary-action danger-action" type="button" data-action="confirm-delete-warehouse">确认删除</button>'}
         </footer>
       </section>
-    </div>
-  `;
-}
-
-function renderTemporaryShelfNotice(tempCount) {
-  return `
-    <div class="organize-notice">
-      <strong>暂存栏已有 ${tempCount} 颗松果。</strong>
-      <span>需要整体更新时，可以使用底部工具栏的“全部重新整理”。</span>
-      <button type="button" data-action="dismiss-notice">稍后</button>
     </div>
   `;
 }
@@ -506,7 +504,7 @@ function renderAddPanel(warehouse) {
         <button type="button" data-action="toggle-add" aria-label="关闭">×</button>
       </div>
       <textarea data-input="pinecone" placeholder="粘贴一段经验、摘抄、灵感或聊天记录...">${escapeHtml(state.newPineconeText)}</textarea>
-      <p>添加后只保存原始松果，并进入暂存栏。当前暂存栏 ${tempCount}/${warehouse.tempLimit}。</p>
+      <p>添加后只保存原始松果，并进入暂存栏。当前暂存栏 ${tempCount} 颗，不限数量。</p>
       <button class="primary-action" type="button" data-action="add-pinecone">添加松果</button>
     </aside>
   `;
@@ -541,14 +539,13 @@ function renderShelfDrawer(warehouse) {
       </button>
       <div class="shelf-content">
         <header class="shelf-rack-header shelf-integrated-header">
-          <div class="shelf-title-row" data-action="toggle-shelf" role="button" tabindex="0" aria-label="收起松果架">
-            ${renderShelfIcon("shelf-title-icon")}
-            <h3>松果架</h3>
-            <button class="shelf-close" type="button" data-action="toggle-shelf" aria-label="收起松果架">×</button>
+          <div class="shelf-tool-row">
+            <label class="shelf-search"><span>搜索松果</span>
+              <input type="search" data-input="shelf-search" value="${escapeHtml(state.shelfQuery)}" placeholder="搜索松果">
+            </label>
+            <button type="button" class="shelf-tool-button primary" data-action="open-shelf-add" ${isActiveWarehouseOrganizing() ? "disabled" : ""}>增加松果</button>
+            <button type="button" class="shelf-tool-button" data-action="toggle-shelf-management" aria-pressed="${state.shelfManaging ? "true" : "false"}" ${isActiveWarehouseOrganizing() ? "disabled" : ""}>${state.shelfManaging ? "完成管理" : "管理松果"}</button>
           </div>
-          <label class="shelf-search"><span>搜索松果</span>
-            <input type="search" data-input="shelf-search" value="${escapeHtml(state.shelfQuery)}" placeholder="搜索松果">
-          </label>
         </header>
         <div class="shelf-rack-body">
           ${shelves.map((shelf) => renderShelfSection(shelf)).join("")}
@@ -577,26 +574,13 @@ function renderShelfSection(shelf) {
   `;
 }
 function renderShelfPinecone(pinecone) {
-  const isEditing = state.editingPineconeId === pinecone.id;
   const readOnly = isActiveWarehouseOrganizing();
   return `
-    <article class="shelf-pinecone">
-      ${isEditing ? `
-        <textarea data-input="pinecone-edit" data-pinecone-id="${pinecone.id}">${escapeHtml(pinecone.content)}</textarea>
-        <div class="pinecone-actions">
-          <button type="button" data-action="save-pinecone" data-pinecone-id="${pinecone.id}">保存</button>
-          <button type="button" data-action="cancel-pinecone-edit">取消</button>
-        </div>
-      ` : `
-        <p>${escapeHtml(pinecone.content)}</p>
-      `}
-      ${!isEditing ? `
-        <div class="pinecone-actions pinecone-action-panel">
-          <button type="button" data-action="toggle-featured" data-pinecone-id="${pinecone.id}" aria-pressed="${pinecone.isFeatured ? "true" : "false"}" ${readOnly ? "disabled" : ""}>${pinecone.isFeatured ? "取消精选" : "精选"}</button>
-          <button type="button" data-action="edit-pinecone" data-pinecone-id="${pinecone.id}" ${readOnly ? "disabled" : ""}>编辑</button>
-          <button type="button" data-action="delete-pinecone" data-pinecone-id="${pinecone.id}" ${readOnly ? "disabled" : ""}>删除</button>
-        </div>
-      ` : ""}
+    <article class="shelf-pinecone ${state.shelfManaging ? "is-managing" : ""}">
+      ${state.shelfManaging ? `
+        <button class="pinecone-delete-button" type="button" data-action="delete-pinecone" data-pinecone-id="${pinecone.id}" aria-label="删除这颗松果" ${readOnly ? "disabled" : ""}>×</button>
+        <textarea data-input="pinecone-manage" data-pinecone-id="${pinecone.id}" aria-label="编辑松果内容" ${readOnly ? "disabled" : ""}>${escapeHtml(state.pineconeDrafts[pinecone.id] ?? pinecone.content)}</textarea>
+      ` : `<p>${escapeHtml(pinecone.content)}</p>`}
     </article>
   `;
 }
@@ -604,12 +588,14 @@ function renderShelfPinecone(pinecone) {
 function bindEvents() {
   document.querySelectorAll("[data-warehouse]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (state.shelfManaging && !saveAllManagedPinecones()) return;
       state.activeWarehouseId = button.dataset.warehouse;
       state.query = "";
       state.addOpen = false;
       state.editMode = false;
       state.documentDraft = null;
-      state.editingPineconeId = null;
+      state.shelfManaging = false;
+      state.pineconeDrafts = {};
       saveState();
       render();
     });
@@ -618,6 +604,7 @@ function bindEvents() {
   document.querySelectorAll("[data-action]").forEach((element) => {
     element.addEventListener("click", (event) => {
       const action = element.dataset.action;
+      if (state.shelfManaging) captureManagedPineconeDrafts();
       if (action === "toggle-add") {
         state.addOpen = !state.addOpen;
         state.editMode = false;
@@ -629,6 +616,18 @@ function bindEvents() {
       if (action === "toggle-shelf") {
         event.stopPropagation();
         toggleShelfDrawer();
+      }
+      if (action === "open-shelf-add") {
+        state.addOpen = true;
+        state.editMode = false;
+        render();
+        document.querySelector("[data-input='pinecone']")?.focus();
+      }
+      if (action === "toggle-shelf-management") {
+        if (state.shelfManaging && !saveAllManagedPinecones()) return;
+        state.shelfManaging = !state.shelfManaging;
+        if (!state.shelfManaging) state.pineconeDrafts = {};
+        render();
       }
       if (action === "add-pinecone") {
         addPinecone();
@@ -658,24 +657,8 @@ function bindEvents() {
       if (action === "jump-section") {
         jumpToSection(Number(element.dataset.sectionIndex || 0));
       }
-      if (action === "dismiss-notice") {
-        showToast("新松果会继续留在暂存栏。");
-      }
-      if (action === "toggle-featured") {
-        toggleFeaturedPinecone(element.dataset.pineconeId);
-      }
-      if (action === "edit-pinecone") {
-        state.editingPineconeId = element.dataset.pineconeId;
-        render();
-      }
-      if (action === "cancel-pinecone-edit") {
-        state.editingPineconeId = null;
-        render();
-      }
-      if (action === "save-pinecone") {
-        savePineconeEdit(element.dataset.pineconeId);
-      }
       if (action === "delete-pinecone") {
+        if (state.shelfManaging && !saveAllManagedPinecones(element.dataset.pineconeId)) return;
         deletePinecone(element.dataset.pineconeId);
       }
     });
@@ -683,14 +666,6 @@ function bindEvents() {
 
   document.querySelectorAll("[data-edit-field]").forEach((field) => {
     field.addEventListener("input", () => updateDocumentDraft(field));
-  });
-
-  document.querySelectorAll(".shelf-title-row[data-action='toggle-shelf']").forEach((titleRow) => {
-    titleRow.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      toggleShelfDrawer();
-    });
   });
 
   document.querySelector("[data-input='search']")?.addEventListener("input", (event) => {
@@ -710,8 +685,15 @@ function bindEvents() {
   });
 
   document.querySelector("[data-input='shelf-search']")?.addEventListener("input", (event) => {
+    if (state.shelfManaging) captureManagedPineconeDrafts();
     state.shelfQuery = event.target.value;
     render();
+  });
+
+  document.querySelectorAll("[data-input='pinecone-manage']").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.pineconeDrafts[input.dataset.pineconeId] = input.value;
+    });
   });
 
 
@@ -729,6 +711,7 @@ function toggleShelfDrawer() {
   drawer?.querySelectorAll("[data-action='toggle-shelf']").forEach((control) => {
     control.setAttribute("aria-label", label);
   });
+
 }
 
 function jumpToSection(index) {
@@ -1031,7 +1014,6 @@ function addPinecone() {
     content,
     status: "temp",
     shelfId: null,
-    isFeatured: false,
     createdAt: nowText().replace(" 更新", ""),
   });
 
@@ -1043,26 +1025,6 @@ function addPinecone() {
   showToast("已放入暂存栏。");
 }
 
-function savePineconeEdit(pineconeId) {
-  if (isActiveWarehouseOrganizing()) return;
-  const warehouse = getActiveWarehouse();
-  const pinecone = warehouse.pinecones.find((item) => item.id === pineconeId);
-  const input = document.querySelector(`[data-input='pinecone-edit'][data-pinecone-id="${pineconeId}"]`);
-  if (!pinecone || !input) return;
-  const nextContent = input.value.trim();
-  if (!nextContent) {
-    showToast("松果内容不能为空。");
-    return;
-  }
-
-  pinecone.content = nextContent;
-  warehouse.updatedAt = nowText();
-  state.editingPineconeId = null;
-  commitWarehouse(warehouse);
-  saveState();
-  showToast("松果已更新。");
-}
-
 function deletePinecone(pineconeId) {
   if (isActiveWarehouseOrganizing()) return;
   const warehouse = getActiveWarehouse();
@@ -1071,21 +1033,34 @@ function deletePinecone(pineconeId) {
 
   warehouse.pinecones = warehouse.pinecones.filter((item) => item.id !== pineconeId);
   warehouse.updatedAt = nowText();
-  state.editingPineconeId = null;
   commitWarehouse(warehouse);
   saveState();
   showToast("松果已删除。");
 }
 
-function toggleFeaturedPinecone(pineconeId) {
-  if (isActiveWarehouseOrganizing()) return;
+function saveAllManagedPinecones(excludedPineconeId = "") {
+  if (isActiveWarehouseOrganizing()) return false;
   const warehouse = getActiveWarehouse();
-  if (!warehouse?.pinecones.some(({ id }) => id === pineconeId)) return;
-  const next = togglePineconeFeatured(warehouse, pineconeId);
-  next.updatedAt = nowText();
-  commitWarehouse(next);
+  captureManagedPineconeDrafts();
+  const edits = Object.entries(state.pineconeDrafts)
+    .filter(([id]) => id !== excludedPineconeId)
+    .map(([id, content]) => ({ id, content }));
+  const result = applyPineconeEdits(warehouse, edits);
+  if (result.invalidIds.length) {
+    showToast("松果内容不能为空。");
+    return false;
+  }
+  result.warehouse.updatedAt = nowText();
+  commitWarehouse(result.warehouse);
+  state.pineconeDrafts = {};
   saveState();
-  render();
+  return true;
+}
+
+function captureManagedPineconeDrafts() {
+  document.querySelectorAll("[data-input='pinecone-manage']").forEach((input) => {
+    state.pineconeDrafts[input.dataset.pineconeId] = input.value;
+  });
 }
 
 function deleteWarehouse(warehouseId) {
@@ -1116,7 +1091,8 @@ function resetWarehouseTransientState() {
   state.editMode = false;
   state.documentDraft = null;
   state.shelfOpen = false;
-  state.editingPineconeId = null;
+  state.shelfManaging = false;
+  state.pineconeDrafts = {};
   state.warehouseDialog = null;
 }
 
@@ -1157,36 +1133,33 @@ function confirmCreateWarehouse() {
   showToast("松果仓已创建。");
 }
 
-async function organizeWarehouse(warehouseId) {
+async function organizeWarehouse(warehouseId, mode) {
   const warehouse = hydrateWarehouseRecord(state, warehouseId);
   if (!warehouse) throw new Error("WAREHOUSE_NOT_FOUND");
   const result = USE_API_ORGANIZER
-    ? await organizeWarehouseWithApi(warehouse)
-    : organizeWarehouseWithMock(warehouse);
+    ? await organizeWarehouseWithApi(warehouse, mode)
+    : organizeWarehouseWithMock(warehouse, mode);
 
   Object.assign(warehouse, result);
   warehouse.updatedAt = nowText();
   commitWarehouse(warehouse);
   saveState();
-  showToast("已全部重新整理，复盘文档已更新。");
+  showToast(mode === "merge" ? "暂存松果已并入当前文档。" : "已全部重新整理，复盘文档已更新。");
 }
 
-async function organizeWarehouseWithApi(_warehouse) {
+async function organizeWarehouseWithApi(_warehouse, _mode) {
   throw new Error("API organizer is reserved. Replace this function with an OpenAI API call.");
 }
 
-function organizeWarehouseWithMock(warehouse) {
-  return organizeWarehouseLocally(warehouse);
+function organizeWarehouseWithMock(warehouse, mode) {
+  return organizeWarehouseLocally(warehouse, { mode });
 }
 
 function requestWarehouseReorganization() {
-  if (!canStartWarehouseOrganization(state.organizingWarehouseId)) {
-    showToast("已有仓库正在整理，请等待当前任务完成。");
-    return;
-  }
+  if (state.shelfManaging && !saveAllManagedPinecones()) return;
   const warehouse = getActiveWarehouse();
-  if (!warehouse || warehouse.pinecones.length === 0) {
-    showToast("仓库里还没有松果。");
+  if (!canStartWarehouseOrganization(state.organizingWarehouseId, warehouse)) {
+    showToast(state.organizingWarehouseId ? "已有仓库正在整理，请等待当前任务完成。" : "暂存栏还没有松果，添加后即可整理。");
     return;
   }
   state.warehouseDialog = { type: "reorganize", warehouseId: warehouse.id };
@@ -1195,8 +1168,10 @@ function requestWarehouseReorganization() {
 
 async function confirmWarehouseReorganization() {
   if (state.warehouseDialog?.type !== "reorganize") return;
-  if (!canStartWarehouseOrganization(state.organizingWarehouseId)) return;
   const warehouseId = state.warehouseDialog.warehouseId;
+  const warehouse = hydrateWarehouseRecord(state, warehouseId);
+  if (!canStartWarehouseOrganization(state.organizingWarehouseId, warehouse)) return;
+  const mode = document.querySelector('input[name="organize-mode"]:checked')?.value || "merge";
   if (state.documentDraft?.id === warehouseId) {
     commitWarehouse(state.documentDraft);
     saveState();
@@ -1206,10 +1181,10 @@ async function confirmWarehouseReorganization() {
   state.editMode = false;
   state.documentDraft = null;
   state.addOpen = false;
-  state.editingPineconeId = null;
+  state.shelfManaging = false;
   render();
   try {
-    await organizeWarehouse(warehouseId);
+    await organizeWarehouse(warehouseId, mode);
   } catch {
     showToast("整理失败，当前文档和松果架保持原样，请稍后重试。");
   } finally {

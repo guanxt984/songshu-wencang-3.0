@@ -123,7 +123,10 @@ const GENERAL_PROFILE = {
 
 const PROFILES = [PRODUCT_MANAGER_PROFILE, HUMAN_NATURE_PROFILE, GENERAL_PROFILE];
 
-export function organizeWarehouseLocally(warehouse) {
+export function organizeWarehouseLocally(warehouse, { mode = "rebuild" } = {}) {
+  if (mode === "merge") return mergeTemporaryPinecones(warehouse);
+  if (mode !== "rebuild") throw new Error("INVALID_ORGANIZE_MODE");
+
   const working = structuredClone(warehouse);
   const targetPinecones = working.pinecones;
 
@@ -148,6 +151,66 @@ export function organizeWarehouseLocally(warehouse) {
 
   working.reviewDocument = buildReviewDocumentFromShelves(working);
   return working;
+}
+
+function mergeTemporaryPinecones(warehouse) {
+  const working = structuredClone(warehouse);
+  const temporaryPinecones = working.pinecones.filter(({ status }) => status === "temp");
+  if (!temporaryPinecones.length) return working;
+
+  const profile = chooseProfile({ ...working, pinecones: temporaryPinecones });
+  const assigned = assignPineconesToShelves(temporaryPinecones, profile.shelves);
+  const sections = working.reviewDocument?.sections || [];
+  working.reviewDocument = working.reviewDocument || { title: working.name, sections };
+  working.shelves = working.shelves || [];
+
+  for (const definition of profile.shelves) {
+    const pinecones = assigned.get(definition.id) || [];
+    if (!pinecones.length) continue;
+
+    let section = findMatchingExistingSection(sections, working.shelves, definition);
+    if (!section) {
+      const shelfId = uniqueShelfId(working, makeShelfId(profile.id, definition.id));
+      const shelf = { id: shelfId, name: definition.name, description: definition.description };
+      working.shelves.push(shelf);
+      section = { shelfId, heading: shelf.name, summary: shelf.description, bullets: [] };
+      sections.push(section);
+    }
+
+    section.bullets ||= [];
+    for (const pinecone of pinecones) {
+      section.bullets.push({ text: summarizePinecone(pinecone.content), pineconeIds: [pinecone.id] });
+      pinecone.status = "shelved";
+      pinecone.shelfId = section.shelfId;
+    }
+  }
+
+  return working;
+}
+
+function findMatchingExistingSection(sections, shelves, definition) {
+  const shelvesById = new Map((shelves || []).map((shelf) => [shelf.id, shelf]));
+  const ranked = sections.map((section) => ({
+    section,
+    score: scoreKeywords([
+      section.heading,
+      section.summary,
+      shelvesById.get(section.shelfId)?.name,
+      shelvesById.get(section.shelfId)?.description,
+    ].filter(Boolean).join(" "), definition.keywords),
+  })).sort((left, right) => right.score - left.score);
+  return ranked[0]?.score > 0 ? ranked[0].section : null;
+}
+
+function uniqueShelfId(warehouse, baseId) {
+  const usedIds = new Set([
+    ...(warehouse.shelves || []).map(({ id }) => id),
+    ...(warehouse.reviewDocument?.sections || []).map(({ shelfId }) => shelfId),
+  ]);
+  if (!usedIds.has(baseId)) return baseId;
+  let suffix = 2;
+  while (usedIds.has(`${baseId}_${suffix}`)) suffix += 1;
+  return `${baseId}_${suffix}`;
 }
 
 function chooseProfile(warehouse) {

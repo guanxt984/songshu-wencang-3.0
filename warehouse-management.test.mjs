@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyDocumentEdit, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, isWarehouseReadOnly, normalizeWarehouseState, removeWarehouse, removeWarehouseRecord, reorderWarehouses, reorderWarehouseRecords, togglePineconeFeatured, useOnlyExampleWarehouses } from "./warehouse-management.js";
+import { applyDocumentEdit, applyPineconeEdits, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, isWarehouseReadOnly, normalizeWarehouseState, removeWarehouse, removeWarehouseRecord, reorderWarehouses, reorderWarehouseRecords, useOnlyExampleWarehouses } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 
 const ids = (items) => items.map((item) => item.id);
@@ -93,14 +93,30 @@ test("applyDocumentEdit preserves a document draft without mutating the stored w
   assert.equal(completedDraft.reviewDocument.sections[0].bullets[0].text, "新要点");
 });
 
-test("togglePineconeFeatured toggles temporary and shelved pinecones without mutation", () => {
-  const warehouse = { pinecones: [{ id: "temp", status: "temp", isFeatured: false }, { id: "shelved", status: "shelved", isFeatured: true }] };
-  const first = togglePineconeFeatured(warehouse, "temp");
-  const second = togglePineconeFeatured(first, "shelved");
+test("applyPineconeEdits saves every managed card together and rejects blank content", () => {
+  const warehouse = { pinecones: [{ id: "p1", content: "旧一" }, { id: "p2", content: "旧二" }] };
+  const saved = applyPineconeEdits(warehouse, [{ id: "p1", content: "新一" }, { id: "p2", content: "新二" }]);
+  const rejected = applyPineconeEdits(warehouse, [{ id: "p1", content: "   " }]);
 
-  assert.equal(warehouse.pinecones[0].isFeatured, false);
-  assert.equal(second.pinecones.find(({ id }) => id === "temp").isFeatured, true);
-  assert.equal(second.pinecones.find(({ id }) => id === "shelved").isFeatured, false);
+  assert.deepEqual(saved.invalidIds, []);
+  assert.deepEqual(saved.warehouse.pinecones.map(({ content }) => content), ["新一", "新二"]);
+  assert.equal(warehouse.pinecones[0].content, "旧一");
+  assert.deepEqual(rejected.invalidIds, ["p1"]);
+  assert.equal(rejected.warehouse, warehouse);
+});
+
+test("normalizeWarehouseState removes obsolete featured and temporary limit fields", () => {
+  const normalized = normalizeWarehouseState({
+    version: 7,
+    activeWarehouseId: "a",
+    warehouses: { byId: { a: { id: "a", name: "A", tempLimit: 5 } }, order: ["a"] },
+    documents: { byWarehouseId: { a: { title: "A", sections: [] } } },
+    shelves: { byWarehouseId: { a: [] } },
+    pinecones: { byWarehouseId: { a: [{ id: "p1", content: "材料", status: "temp", isFeatured: true }] } },
+  }, 7);
+
+  assert.equal(Object.hasOwn(normalized.warehouses.byId.a, "tempLimit"), false);
+  assert.equal(Object.hasOwn(normalized.pinecones.byWarehouseId.a[0], "isFeatured"), false);
 });
 
 test("deriveShelfSections follows document pinecone ids instead of stale shelf ids", () => {
@@ -126,8 +142,11 @@ test("isWarehouseReadOnly locks only the warehouse with an active organization",
 });
 
 test("canStartWarehouseOrganization enforces one active job across warehouses", () => {
-  assert.equal(canStartWarehouseOrganization(null), true);
-  assert.equal(canStartWarehouseOrganization("a"), false);
+  const withTemporary = { pinecones: [{ id: "temp", status: "temp" }] };
+  const withoutTemporary = { pinecones: [{ id: "shelved", status: "shelved" }] };
+  assert.equal(canStartWarehouseOrganization(null, withTemporary), true);
+  assert.equal(canStartWarehouseOrganization(null, withoutTemporary), false);
+  assert.equal(canStartWarehouseOrganization("a", withTemporary), false);
 });
 
 test("getWarehouseRecords hydrates isolated records without sharing nested data", () => {
@@ -175,6 +194,7 @@ test("createEmptyWarehouseRecord initializes independent empty document shelf an
   assert.deepEqual(record.shelves.map((shelf) => shelf.id), ["ideas"]);
   assert.deepEqual(record.pinecones, []);
   assert.equal(record.document.sections[0].shelfId, "ideas");
+  assert.equal(Object.hasOwn(record.warehouse, "tempLimit"), false);
 });
 
 test("reorderWarehouseRecords only changes order metadata", () => {

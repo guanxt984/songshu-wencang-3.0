@@ -3,12 +3,37 @@
   "$id": "https://songshu.example/contracts/ai-organize-request-v1.json",
   "title": "AI organize request v1",
   "type": "object",
-  "required": ["warehouseId", "revision", "idempotencyKey", "pinecones"],
+  "required": ["warehouseId", "revision", "idempotencyKey", "mode", "pinecones"],
   "additionalProperties": false,
   "properties": {
     "warehouseId": { "type": "string", "minLength": 1 },
     "revision": { "type": "integer", "minimum": 0 },
     "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "mode": { "enum": ["merge", "rebuild"] },
+    "currentDocument": {
+      "type": "object",
+      "required": ["title", "sections"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "sections": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "summary", "points", "pineconeIds"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "summary": { "type": "string", "maxLength": 2000 },
+              "points": { "type": "array", "maxItems": 200, "items": { "type": "string", "maxLength": 1000 } },
+              "pineconeIds": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
     "pinecones": {
       "type": "array",
       "maxItems": 500,
@@ -22,5 +47,9 @@
         }
       }
     }
-  }
+  },
+  "allOf": [{
+    "if": { "properties": { "mode": { "const": "merge" } } },
+    "then": { "required": ["currentDocument"] }
+  }]
 }

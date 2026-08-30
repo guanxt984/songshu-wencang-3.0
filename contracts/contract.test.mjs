@@ -31,6 +31,7 @@ test("organize request enforces payload limits and result assigns each pinecone 
     warehouseId: "w1",
     revision: 1,
     idempotencyKey: "request-1",
+    mode: "rebuild",
     pinecones: [{ id: "p1", content: "x".repeat(4001) }],
   }).code, "AI_INPUT_ITEM_TOO_LARGE");
 
@@ -43,6 +44,84 @@ test("organize request enforces payload limits and result assigns each pinecone 
       ],
     },
   }, ["p1"]).code, "AI_OUTPUT_PINECONE_ASSIGNMENT_INVALID");
+});
+
+test("organize request requires a declared mode and document context for merge", () => {
+  const base = {
+    warehouseId: "w1",
+    revision: 1,
+    idempotencyKey: "request-1",
+    pinecones: [{ id: "p1", content: "新增材料" }],
+  };
+
+  assert.equal(validateOrganizeRequest(base).ok, false);
+  assert.equal(validateOrganizeRequest({ ...base, mode: "merge" }).ok, false);
+  assert.equal(validateOrganizeRequest({ ...base, mode: "merge", currentDocument: { title: "文档", sections: [] } }).ok, true);
+  assert.equal(validateOrganizeRequest({ ...base, mode: "rebuild" }).ok, true);
+  assert.equal(validateOrganizeRequest({ ...base, mode: "unknown" }).ok, false);
+});
+
+test("merge result permits preserved old references while assigning each temporary pinecone once", () => {
+  const currentDocument = {
+    title: "人工标题",
+    sections: [{ id: "one", title: "人工章节", summary: "人工摘要", points: ["旧内容"], pineconeIds: ["old-id", "old-id"] }],
+  };
+  const result = {
+    document: {
+      title: "人工标题",
+      sections: [{
+        id: "one",
+        title: "人工章节",
+        summary: "人工摘要",
+        points: ["旧内容", "新内容"],
+        pineconeIds: ["old-id", "old-id", "temp-id"],
+      }],
+    },
+  };
+
+  assert.equal(validateOrganizeResult(result, ["temp-id"], { mode: "merge", currentDocument }).ok, true);
+  assert.equal(validateOrganizeResult(result, ["temp-id"], { mode: "rebuild" }).ok, false);
+});
+
+test("merge validation rejects rewritten current content and malformed document context without throwing", () => {
+  const base = {
+    warehouseId: "w1",
+    revision: 1,
+    idempotencyKey: "request-1",
+    mode: "merge",
+    pinecones: [{ id: "temp-id", content: "新增材料" }],
+  };
+  const currentDocument = {
+    title: "人工标题",
+    sections: [{ id: "one", title: "人工章节", summary: "人工摘要", points: ["旧内容"], pineconeIds: ["old-id"] }],
+  };
+  const rewritten = {
+    document: {
+      title: "被重写",
+      sections: [{ id: "one", title: "被重写", summary: "被重写", points: ["被重写", "新内容"], pineconeIds: ["old-id", "temp-id"] }],
+    },
+  };
+
+  assert.equal(validateOrganizeRequest({ ...base, currentDocument: { sections: "bad" } }).ok, false);
+  assert.doesNotThrow(() => validateOrganizeResult(rewritten, ["temp-id"], { mode: "merge", currentDocument: { sections: "bad" } }));
+  assert.equal(validateOrganizeResult(rewritten, ["temp-id"], { mode: "merge", currentDocument: { sections: "bad" } }).code, "VALIDATION_FAILED");
+  assert.equal(validateOrganizeResult(rewritten, ["temp-id"], { mode: "merge", currentDocument }).code, "AI_OUTPUT_PRESERVATION_INVALID");
+});
+
+test("accepted merge requests have unique sections and disjoint old and temporary references", () => {
+  const base = {
+    warehouseId: "w1",
+    revision: 1,
+    idempotencyKey: "request-1",
+    mode: "merge",
+    pinecones: [{ id: "same", content: "新增材料" }],
+  };
+  const section = { id: "one", title: "章节", summary: "摘要", points: ["旧内容"], pineconeIds: ["old"] };
+
+  assert.equal(validateOrganizeRequest({ ...base, currentDocument: { title: " ", sections: [] } }).ok, false);
+  assert.equal(validateOrganizeRequest({ ...base, currentDocument: { title: "文档", sections: [section, { ...section }] } }).ok, false);
+  assert.equal(validateOrganizeRequest({ ...base, currentDocument: { title: "文档", sections: [{ ...section, pineconeIds: ["same"] }] } }).ok, false);
+  assert.equal(validateOrganizeRequest({ ...base, currentDocument: { title: "文档", sections: [section] } }).ok, true);
 });
 
 test("AI jobs only use declared forward transitions", () => {

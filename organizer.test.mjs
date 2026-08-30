@@ -55,3 +55,95 @@ test("reorganize preserves source mapping from document bullets to pinecones", (
   assert.deepEqual([...mappedIds].sort(), ["h1", "h2", "h3"]);
   assert.ok(result.shelves.some((shelf) => shelf.name.includes("尊重") || shelf.name.includes("倾听")));
 });
+
+test("merge organization preserves existing document fields and appends only temporary pinecones", () => {
+  const warehouse = {
+    id: "merge",
+    name: "产品笔记",
+    shelves: [{ id: "existing", name: "用户研究", description: "人工改过的架子说明" }],
+    pinecones: [
+      { id: "old", content: "旧材料", status: "shelved", shelfId: "existing" },
+      { id: "new", content: "用户访谈应该先确认真实使用场景。", status: "temp" },
+    ],
+    reviewDocument: {
+      title: "我的人工标题",
+      sections: [{
+        shelfId: "existing",
+        heading: "人工章节标题",
+        summary: "人工摘要与批注",
+        bullets: [{ text: "人工修改后的要点", pineconeIds: ["old"] }],
+      }],
+    },
+  };
+
+  const result = organizeWarehouseLocally(warehouse, { mode: "merge" });
+
+  assert.equal(result.reviewDocument.title, "我的人工标题");
+  assert.equal(result.reviewDocument.sections[0].heading, "人工章节标题");
+  assert.equal(result.reviewDocument.sections[0].summary, "人工摘要与批注");
+  assert.equal(result.reviewDocument.sections[0].bullets[0].text, "人工修改后的要点");
+  assert.deepEqual(result.reviewDocument.sections[0].bullets[1], {
+    text: "用户访谈应该先确认真实使用场景。",
+    pineconeIds: ["new"],
+  });
+  assert.equal(result.pinecones.find(({ id }) => id === "old").shelfId, "existing");
+  assert.equal(result.pinecones.find(({ id }) => id === "new").status, "shelved");
+  assert.equal(warehouse.pinecones.find(({ id }) => id === "new").status, "temp");
+});
+
+test("merge organization creates a new section when no current section matches", () => {
+  const warehouse = {
+    id: "merge-new",
+    name: "产品笔记",
+    shelves: [{ id: "existing", name: "项目复盘", description: "复盘" }],
+    pinecones: [{ id: "new", content: "AI 模型评测需要覆盖数据和提示词边界。", status: "temp" }],
+    reviewDocument: {
+      title: "产品笔记",
+      sections: [{ shelfId: "existing", heading: "项目复盘", summary: "复盘", bullets: [] }],
+    },
+  };
+
+  const result = organizeWarehouseLocally(warehouse, { mode: "merge" });
+
+  assert.equal(result.reviewDocument.sections[0].heading, "项目复盘");
+  assert.ok(result.reviewDocument.sections.length > 1);
+  assert.deepEqual(
+    result.reviewDocument.sections.flatMap((section) => section.bullets).flatMap((bullet) => bullet.pineconeIds),
+    ["new"],
+  );
+});
+
+test("rebuild organization replaces user-edited sections and assigns all pinecones", () => {
+  const warehouse = {
+    id: "rebuild",
+    name: "产品笔记",
+    shelves: [{ id: "manual", name: "人工架子", description: "人工说明" }],
+    pinecones: [
+      { id: "old", content: "产品需求来自真实用户场景。", status: "shelved", shelfId: "manual" },
+      { id: "new", content: "PRD 应该写清流程和验收标准。", status: "temp" },
+    ],
+    reviewDocument: {
+      title: "人工标题",
+      sections: [{ shelfId: "manual", heading: "人工章节", summary: "人工摘要", bullets: [] }],
+    },
+  };
+
+  const result = organizeWarehouseLocally(warehouse, { mode: "rebuild" });
+
+  assert.equal(result.reviewDocument.title, "产品笔记");
+  assert.equal(result.reviewDocument.sections.some(({ heading }) => heading === "人工章节"), false);
+  assert.equal(result.pinecones.every(({ status }) => status === "shelved"), true);
+});
+
+test("organization rejects an unknown mode instead of falling back to rebuild", () => {
+  const warehouse = {
+    id: "invalid-mode",
+    name: "文档",
+    shelves: [{ id: "manual", name: "人工架子", description: "人工说明" }],
+    pinecones: [{ id: "p1", content: "材料", status: "temp" }],
+    reviewDocument: { title: "人工标题", sections: [] },
+  };
+
+  assert.throws(() => organizeWarehouseLocally(warehouse, { mode: "typo" }), /INVALID_ORGANIZE_MODE/);
+  assert.equal(warehouse.reviewDocument.title, "人工标题");
+});

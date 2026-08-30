@@ -11,6 +11,7 @@
   "AI_INPUT_TOO_LARGE": { "httpStatus": 422, "message": "本次整理材料总量过大" },
   "AI_INPUT_TOO_MANY_ITEMS": { "httpStatus": 422, "message": "本次整理松果数量过多" },
   "AI_OUTPUT_SCHEMA_INVALID": { "httpStatus": 502, "message": "整理结果格式异常，请重试" },
+  "AI_OUTPUT_PRESERVATION_INVALID": { "httpStatus": 502, "message": "增量整理未能保留当前文档，请重试" },
   "AI_OUTPUT_PINECONE_ASSIGNMENT_INVALID": { "httpStatus": 502, "message": "整理结果未能完整归类材料，请重试" },
   "AI_QUOTA_EXCEEDED": { "httpStatus": 429, "message": "今日整理次数已用完" },
   "AI_JOB_ACTIVE": { "httpStatus": 409, "message": "当前账号已有整理任务进行中" },
