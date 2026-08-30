@@ -20,7 +20,7 @@ test("reorganize creates topic-specific shelves instead of interview defaults", 
     reviewDocument: { title: "《如何成为产品经理》", sections: [] },
   };
 
-  const result = organizeWarehouseLocally(warehouse, "reorganize");
+  const result = organizeWarehouseLocally(warehouse);
 
   assert.ok(result.shelves.length >= 3);
   assert.ok(!result.shelves.some((shelf) => shelf.name === "简历准备"));
@@ -47,7 +47,7 @@ test("reorganize preserves source mapping from document bullets to pinecones", (
     reviewDocument: { title: "《人性的弱点摘抄》", sections: [] },
   };
 
-  const result = organizeWarehouseLocally(warehouse, "reorganize");
+  const result = organizeWarehouseLocally(warehouse);
   const mappedIds = new Set(result.reviewDocument.sections.flatMap((section) =>
     section.bullets.flatMap((bullet) => bullet.pineconeIds),
   ));

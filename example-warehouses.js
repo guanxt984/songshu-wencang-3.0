@@ -3,7 +3,7 @@ const createItems = (prefix, contents) => contents.map((content, index) => ({
   content,
 }));
 
-function buildExampleWarehouse({ id, name, iconDataUrl, updatedAt, items, shelfDefinitions, temporaryIds }) {
+function buildExampleWarehouse({ id, name, updatedAt, items, shelfDefinitions, temporaryIds }) {
   const temporarySet = new Set(temporaryIds);
   const shelfByItemId = new Map(
     shelfDefinitions.flatMap((shelf) => shelf.itemIds.map((itemId) => [itemId, shelf.id])),
@@ -39,7 +39,6 @@ function buildExampleWarehouse({ id, name, iconDataUrl, updatedAt, items, shelfD
   return {
     id,
     name,
-    iconDataUrl,
     updatedAt,
     tempLimit: 5,
     pinecones,
@@ -155,7 +154,6 @@ const humanNatureShelves = [
 const productManager = buildExampleWarehouse({
   id: "example_product_manager",
   name: "《如何成为产品经理》",
-  iconDataUrl: "assets/illustrations/warehouse-icon-product-manager.png",
   updatedAt: "今天 10:20 更新",
   items: productManagerItems,
   shelfDefinitions: productManagerShelves,
@@ -165,7 +163,6 @@ const productManager = buildExampleWarehouse({
 const humanNature = buildExampleWarehouse({
   id: "example_human_nature",
   name: "《人性的弱点摘抄》",
-  iconDataUrl: "assets/illustrations/warehouse-icon-human-nature.png",
   updatedAt: "今天 09:45 更新",
   items: humanNatureItems,
   shelfDefinitions: humanNatureShelves,

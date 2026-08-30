@@ -1,4 +1,4 @@
-import { createEmptyWarehouseRecord, getWarehouseRecords, hydrateWarehouseRecord, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, useOnlyExampleWarehouses } from "./warehouse-management.js";
+import { applyDocumentEdit, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hydrateWarehouseRecord, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, togglePineconeFeatured, useOnlyExampleWarehouses } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 import { organizeWarehouseLocally } from "./organizer.js";
 
@@ -39,14 +39,11 @@ const initialState = {
   addOpen: false,
   editMode: false,
   newPineconeText: "",
-  addDestination: "temp",
-  selectedShelfId: "",
-  newShelfName: "",
   shelfQuery: "",
   editingPineconeId: null,
-  activeShelfActionId: null,
+  documentDraft: null,
+  organizingWarehouseId: null,
   referenceIds: [],
-  iconCrop: null,
   warehouseDialog: null,
   toast: "",
   warehouses: [
@@ -226,12 +223,10 @@ function resetTransientState(nextState) {
     toast: "",
     referenceIds: [],
     newPineconeText: "",
-    addDestination: "temp",
-    selectedShelfId: "",
-    newShelfName: "",
     shelfQuery: "",
     editingPineconeId: null,
-    activeShelfActionId: null,
+    documentDraft: null,
+    organizingWarehouseId: null,
     warehouseDialog: null,
   };
 }
@@ -240,9 +235,9 @@ function saveState() {
   const {
     toast: _toast,
     referenceIds: _referenceIds,
-    iconCrop: _iconCrop,
     editMode: _editMode,
-    activeShelfActionId: _activeShelfActionId,
+    documentDraft: _documentDraft,
+    organizingWarehouseId: _organizingWarehouseId,
     warehouseDialog: _warehouseDialog,
     ...persisted
   } = state;
@@ -250,6 +245,7 @@ function saveState() {
 }
 
 function getActiveWarehouse() {
+  if (state.editMode && state.documentDraft?.id === state.activeWarehouseId) return state.documentDraft;
   return hydrateWarehouseRecord(state, state.activeWarehouseId)
     || getWarehouseList()[0]
     || null;
@@ -261,6 +257,10 @@ function getWarehouseList() {
 
 function commitWarehouse(warehouse) {
   state = persistWarehouseRecord(state, warehouse);
+}
+
+function isActiveWarehouseOrganizing() {
+  return isWarehouseReadOnly(state.organizingWarehouseId, state.activeWarehouseId);
 }
 
 function render() {
@@ -276,7 +276,7 @@ function render() {
   const featuredCount = warehouse.pinecones.filter((pinecone) => pinecone.isFeatured).length;
 
   app.innerHTML = `
-    <section class="page-shell">
+    <section class="page-shell" ${state.warehouseDialog ? "inert" : ""}>
       <header class="topbar">
         <div class="brand">
           ${icons.logo("brand-squirrel")}
@@ -339,8 +339,6 @@ function render() {
       </main>
     </section>
 
-    <input id="warehouse-icon-file" type="file" accept="image/*" hidden>
-    ${state.iconCrop ? renderIconCropModal() : ""}
     ${state.warehouseDialog ? renderWarehouseDialog() : ""}
   `;
 
@@ -350,7 +348,7 @@ function render() {
 
 function renderEmptyWarehouseState() {
   return `
-    <section class="page-shell empty-warehouse-shell">
+    <section class="page-shell empty-warehouse-shell" ${state.warehouseDialog ? "inert" : ""}>
       <header class="topbar">
         <div class="brand">
           ${icons.logo("brand-squirrel")}
@@ -373,12 +371,13 @@ function renderEmptyWarehouseState() {
 
 function renderWarehouseCard(warehouse) {
   const active = warehouse.id === state.activeWarehouseId;
+  const locked = isWarehouseReadOnly(state.organizingWarehouseId, warehouse.id);
   return `
     <article class="warehouse-card ${active ? "active" : ""}"
-      data-warehouse-card="${warehouse.id}" draggable="true">
-      <button class="warehouse-icon-button" type="button" data-icon-target="${warehouse.id}" aria-label="自定义 ${escapeHtml(warehouse.name)} 图标">
+      data-warehouse-card="${warehouse.id}" draggable="${state.organizingWarehouseId ? "false" : "true"}">
+      <span class="warehouse-icon-button" aria-hidden="true">
         ${renderWarehouseIcon(warehouse)}
-      </button>
+      </span>
       <button class="warehouse-copy" type="button" data-warehouse="${warehouse.id}">
         <strong>${escapeHtml(warehouse.name)}</strong>
         <small>${escapeHtml(warehouse.updatedAt)}</small>
@@ -386,17 +385,13 @@ function renderWarehouseCard(warehouse) {
       ${active ? '<i class="active-dot"></i>' : ""}
       <button class="warehouse-delete-button" type="button"
         data-action="delete-warehouse" data-warehouse-id="${warehouse.id}"
-        aria-label="删除 ${escapeHtml(warehouse.name)}">×</button>
+        aria-label="删除 ${escapeHtml(warehouse.name)}" ${locked ? "disabled" : ""}>×</button>
     </article>
   `;
 }
 
 function renderWarehouseIcon(warehouse) {
-  if (warehouse.iconDataUrl) {
-    return `<img class="warehouse-icon custom-warehouse-icon" src="${warehouse.iconDataUrl}" alt="">`;
-  }
-
-  return asset("pinecone-warehouse-icon.png", "warehouse-icon");
+  return asset("pinecone-warehouse-icon.png", `warehouse-icon warehouse-color-${getWarehouseColor(warehouse.name)}`);
 }
 
 function renderShelfIcon(className) {
@@ -404,59 +399,36 @@ function renderShelfIcon(className) {
 }
 
 function renderToolbar() {
+  const readOnly = isActiveWarehouseOrganizing();
   return `
     <img class="document-mascot" src="assets/illustrations/squirrel-toolbar-perched-v2.png" alt="" aria-hidden="true">
     <nav class="document-corner-tools" aria-label="文档工具" data-toolbar>
-      <button class="corner-tool" type="button" data-action="toggle-add" aria-label="添加松果" title="添加松果"><span class="toolbar-icon-box">${icons.plus("toolbar-img add")}</span><span class="corner-tool-label">添加松果</span></button>
-      <button class="corner-tool" type="button" data-action="toggle-document-edit" aria-label="${state.editMode ? "保存文档" : "编辑文档"}" title="${state.editMode ? "保存文档" : "编辑文档"}"><span class="toolbar-icon-box">${icons.book("toolbar-img")}</span><span class="corner-tool-label">${state.editMode ? "保存文档" : "编辑文档"}</span></button>
-      <button class="corner-tool" type="button" data-action="reorganize" aria-label="全部重新整理" title="全部重新整理"><span class="toolbar-icon-box">${icons.leaf("toolbar-img")}</span><span class="corner-tool-label">重新整理</span></button>
+      <button class="corner-tool" type="button" data-action="toggle-add" aria-label="添加松果" title="添加松果" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.plus("toolbar-img add")}</span><span class="corner-tool-label">添加松果</span></button>
+      <button class="corner-tool" type="button" data-action="toggle-document-edit" aria-label="${state.editMode ? "保存文档" : "编辑文档"}" title="${state.editMode ? "保存文档" : "编辑文档"}" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.book("toolbar-img")}</span><span class="corner-tool-label">${state.editMode ? "保存文档" : "编辑文档"}</span></button>
+      <button class="corner-tool" type="button" data-action="reorganize" aria-label="全部重新整理" title="全部重新整理" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.leaf("toolbar-img")}</span><span class="corner-tool-label">${readOnly ? "整理中" : "重新整理"}</span></button>
     </nav>
   `;
 }
-function renderIconCropModal() {
-  return `
-    <div class="modal-backdrop" data-action="cancel-icon-crop">
-      <section class="icon-crop-modal" role="dialog" aria-modal="true" aria-label="调整松果仓图标">
-        <header>
-          <h3>调整图标圆形区域</h3>
-          <button type="button" data-action="cancel-icon-crop" aria-label="关闭">×</button>
-        </header>
-        <div class="crop-stage">
-          <div class="crop-preview">
-            <img src="${state.iconCrop.dataUrl}" alt="" style="transform: translate(${state.iconCrop.offsetX}px, ${state.iconCrop.offsetY}px) scale(${state.iconCrop.zoom / 100});">
-          </div>
-        </div>
-        <label>左右 <input type="range" min="-100" max="100" value="${state.iconCrop.offsetX}" data-crop-input="offsetX"></label>
-        <label>上下 <input type="range" min="-100" max="100" value="${state.iconCrop.offsetY}" data-crop-input="offsetY"></label>
-        <label>缩放 <input type="range" min="70" max="220" value="${state.iconCrop.zoom}" data-crop-input="zoom"></label>
-        <footer>
-          <button type="button" data-action="cancel-icon-crop">取消</button>
-          <button class="primary-action" type="button" data-action="save-icon-crop">保存图标</button>
-        </footer>
-      </section>
-    </div>
-  `;
-}
-
 function renderWarehouseDialog() {
   const dialog = state.warehouseDialog;
   if (!dialog) return "";
 
   const isCreate = dialog.type === "create";
-  const warehouse = isCreate
-    ? null
-    : hydrateWarehouseRecord(state, dialog.warehouseId);
+  const isReorganize = dialog.type === "reorganize";
+  const warehouse = isCreate ? null : hydrateWarehouseRecord(state, dialog.warehouseId);
   if (!isCreate && !warehouse) return "";
 
   return `
     <div class="modal-backdrop warehouse-dialog-backdrop">
       <section class="warehouse-dialog" role="dialog" aria-modal="true" aria-labelledby="warehouse-dialog-title">
         <header>
-          <h3 id="warehouse-dialog-title">${isCreate ? "新建松果仓" : "删除松果仓"}</h3>
+          <h3 id="warehouse-dialog-title">${isCreate ? "新建松果仓" : isReorganize ? "全部重新整理" : "删除松果仓"}</h3>
         </header>
         ${isCreate ? `
           <label for="warehouse-name-input">松果仓名称</label>
           <input id="warehouse-name-input" type="text" data-input="warehouse-name" autocomplete="off" required>
+        ` : isReorganize ? `
+          <p>将使用仓库中的全部松果重新生成文档和松果架。当前文档中的人工修改将在整理成功后被替换。整理期间该仓库进入只读状态。</p>
         ` : `
           <p>确定删除“${escapeHtml(warehouse.name)}”吗？仓内松果和整理文档会一并删除。</p>
         `}
@@ -464,7 +436,9 @@ function renderWarehouseDialog() {
           <button type="button" data-action="cancel-warehouse-dialog">取消</button>
           ${isCreate
             ? '<button class="primary-action" type="button" data-action="confirm-create-warehouse">创建</button>'
-            : '<button class="primary-action danger-action" type="button" data-action="confirm-delete-warehouse">确认删除</button>'}
+            : isReorganize
+              ? '<button class="primary-action" type="button" data-action="confirm-reorganize">开始整理</button>'
+              : '<button class="primary-action danger-action" type="button" data-action="confirm-delete-warehouse">确认删除</button>'}
         </footer>
       </section>
     </div>
@@ -525,7 +499,6 @@ function renderKeyBox(section, sectionIndex) {
 
 function renderAddPanel(warehouse) {
   const tempCount = warehouse.pinecones.filter((pinecone) => pinecone.status === "temp").length;
-  const selectedShelfId = state.selectedShelfId || warehouse.shelves[0]?.id || "";
   return `
     <aside class="add-panel">
       <div>
@@ -533,25 +506,7 @@ function renderAddPanel(warehouse) {
         <button type="button" data-action="toggle-add" aria-label="关闭">×</button>
       </div>
       <textarea data-input="pinecone" placeholder="粘贴一段经验、摘抄、灵感或聊天记录...">${escapeHtml(state.newPineconeText)}</textarea>
-      <fieldset class="add-destination">
-        <legend>选择去向</legend>
-        <label><input type="radio" name="add-destination" value="temp" ${state.addDestination === "temp" ? "checked" : ""}> 暂存栏</label>
-        <label><input type="radio" name="add-destination" value="existing" ${state.addDestination === "existing" ? "checked" : ""}> 已有素材栏</label>
-        <label><input type="radio" name="add-destination" value="new" ${state.addDestination === "new" ? "checked" : ""}> 新建素材栏</label>
-      </fieldset>
-      ${state.addDestination === "existing" ? `
-        <label class="add-field">素材栏
-          <select data-input="selected-shelf">
-            ${warehouse.shelves.map((shelf) => `<option value="${shelf.id}" ${selectedShelfId === shelf.id ? "selected" : ""}>${escapeHtml(shelf.name)}</option>`).join("")}
-          </select>
-        </label>
-      ` : ""}
-      ${state.addDestination === "new" ? `
-        <label class="add-field">新素材栏名称
-          <input type="text" data-input="new-shelf-name" placeholder="例如：面试表达" value="${escapeHtml(state.newShelfName)}">
-        </label>
-      ` : ""}
-      <p>${state.addDestination === "temp" ? `添加后只保存原始松果，不更新复盘文档。当前暂存栏 ${tempCount}/${warehouse.tempLimit}。` : "添加后会更新对应文档分区，不影响其他分区。"}</p>
+      <p>添加后只保存原始松果，并进入暂存栏。当前暂存栏 ${tempCount}/${warehouse.tempLimit}。</p>
       <button class="primary-action" type="button" data-action="add-pinecone">添加松果</button>
     </aside>
   `;
@@ -567,22 +522,15 @@ function renderShelfDrawer(warehouse) {
     {
       id: "temp",
       name: "暂存栏",
-      description: "还没有整理进文档的原始松果，适合先集中查看、再移动到对应章节。",
+      description: "还没有整理进文档的原始松果；执行全部重新整理后，系统会统一确定章节归属。",
       pinecones: tempPinecones,
       isTemporary: true,
     },
-    ...warehouse.reviewDocument.sections.map((section) => {
-    const shelf = warehouse.shelves.find((item) => item.id === section.shelfId);
-    const pinecones = warehouse.pinecones.filter((pinecone) =>
-      pinecone.status === "shelved" && pinecone.shelfId === section.shelfId,
-    );
-    return {
-      id: section.shelfId,
-      name: section.heading,
-      description: section.summary || shelf?.description || "",
-      pinecones: filterPinecones(pinecones),
-    };
-  })];
+    ...deriveShelfSections(warehouse).map((section) => ({
+      ...section,
+      pinecones: filterPinecones(section.pinecones),
+    })),
+  ];
 
   return `
     <aside class="shelf-drawer ${state.shelfOpen ? "open" : ""}">
@@ -603,15 +551,14 @@ function renderShelfDrawer(warehouse) {
           </label>
         </header>
         <div class="shelf-rack-body">
-          ${shelves.map((shelf) => renderShelfSection(shelf, warehouse)).join("")}
+          ${shelves.map((shelf) => renderShelfSection(shelf)).join("")}
         </div>
       </div>
     </aside>
   `;
 }
 
-function renderShelfSection(shelf, warehouse) {
-  const isActionOpen = state.activeShelfActionId === shelf.id || shelf.pinecones.some((pinecone) => state.editingPineconeId === pinecone.id);
+function renderShelfSection(shelf) {
   return `
     <section class="shelf-section ${shelf.isTemporary ? "temporary-shelf-section" : ""}">
       <header class="shelf-section-head">
@@ -619,19 +566,19 @@ function renderShelfSection(shelf, warehouse) {
           <strong>${escapeHtml(shelf.name)}</strong>
           <small class="shelf-count">${shelf.pinecones.length} 颗松果${shelf.isTemporary ? " · 待整理" : ""}</small>
         </span>
-        <button class="shelf-modify-button" type="button" data-action="toggle-shelf-actions" data-shelf-id="${shelf.id}" aria-expanded="${isActionOpen ? "true" : "false"}">修改</button>
       </header>
       <div class="shelf-section-body">
         <p>${escapeHtml(shelf.description)}</p>
         <div class="shelf-pinecones">
-          ${shelf.pinecones.length ? shelf.pinecones.map((pinecone) => renderShelfPinecone(pinecone, warehouse, isActionOpen)).join("") : '<em class="empty-shelf">这里还没有松果</em>'}
+          ${shelf.pinecones.length ? shelf.pinecones.map((pinecone) => renderShelfPinecone(pinecone)).join("") : '<em class="empty-shelf">这里还没有松果</em>'}
         </div>
       </div>
     </section>
   `;
 }
-function renderShelfPinecone(pinecone, warehouse, isActionOpen) {
+function renderShelfPinecone(pinecone) {
   const isEditing = state.editingPineconeId === pinecone.id;
+  const readOnly = isActiveWarehouseOrganizing();
   return `
     <article class="shelf-pinecone">
       ${isEditing ? `
@@ -643,16 +590,11 @@ function renderShelfPinecone(pinecone, warehouse, isActionOpen) {
       ` : `
         <p>${escapeHtml(pinecone.content)}</p>
       `}
-      ${!isEditing && isActionOpen ? `
+      ${!isEditing ? `
         <div class="pinecone-actions pinecone-action-panel">
-          <label class="move-control">移动到
-            <select data-action="move-pinecone" data-pinecone-id="${pinecone.id}">
-              <option value="temp" ${pinecone.status === "temp" ? "selected" : ""}>暂存栏</option>
-              ${warehouse.shelves.map((shelf) => `<option value="${shelf.id}" ${pinecone.shelfId === shelf.id ? "selected" : ""}>${escapeHtml(shelf.name)}</option>`).join("")}
-            </select>
-          </label>
-          <button type="button" data-action="edit-pinecone" data-pinecone-id="${pinecone.id}">编辑</button>
-          <button type="button" data-action="delete-pinecone" data-pinecone-id="${pinecone.id}">删除</button>
+          <button type="button" data-action="toggle-featured" data-pinecone-id="${pinecone.id}" aria-pressed="${pinecone.isFeatured ? "true" : "false"}" ${readOnly ? "disabled" : ""}>${pinecone.isFeatured ? "取消精选" : "精选"}</button>
+          <button type="button" data-action="edit-pinecone" data-pinecone-id="${pinecone.id}" ${readOnly ? "disabled" : ""}>编辑</button>
+          <button type="button" data-action="delete-pinecone" data-pinecone-id="${pinecone.id}" ${readOnly ? "disabled" : ""}>删除</button>
         </div>
       ` : ""}
     </article>
@@ -660,33 +602,16 @@ function renderShelfPinecone(pinecone, warehouse, isActionOpen) {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-icon-target]").forEach((button) => {
-    button.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      openIconPicker(button.dataset.iconTarget);
-    });
-  });
-
   document.querySelectorAll("[data-warehouse]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeWarehouseId = button.dataset.warehouse;
       state.query = "";
       state.addOpen = false;
       state.editMode = false;
-      state.iconCrop = null;
+      state.documentDraft = null;
       state.editingPineconeId = null;
-      state.activeShelfActionId = null;
       saveState();
       render();
-    });
-  });
-
-  document.querySelector("#warehouse-icon-file")?.addEventListener("change", handleIconFileSelected);
-
-  document.querySelectorAll("[data-crop-input]").forEach((input) => {
-    input.addEventListener("input", () => {
-      updateIconCrop(input.dataset.cropInput, Number(input.value));
     });
   });
 
@@ -709,7 +634,7 @@ function bindEvents() {
         addPinecone();
       }
       if (action === "reorganize") {
-        organizeWarehouse("reorganize");
+        requestWarehouseReorganization();
       }
       if (action === "create-warehouse") {
         createWarehouse();
@@ -727,37 +652,24 @@ function bindEvents() {
       if (action === "confirm-delete-warehouse") {
         confirmDeleteWarehouse();
       }
+      if (action === "confirm-reorganize") {
+        confirmWarehouseReorganization();
+      }
       if (action === "jump-section") {
         jumpToSection(Number(element.dataset.sectionIndex || 0));
       }
       if (action === "dismiss-notice") {
         showToast("新松果会继续留在暂存栏。");
       }
-      if (action === "cancel-icon-crop") {
-        if (event.target === element || element.tagName === "BUTTON") {
-          state.iconCrop = null;
-          render();
-        }
-      }
-      if (action === "save-icon-crop") {
-        saveWarehouseIcon();
+      if (action === "toggle-featured") {
+        toggleFeaturedPinecone(element.dataset.pineconeId);
       }
       if (action === "edit-pinecone") {
-        const warehouse = getActiveWarehouse();
-        const pinecone = warehouse?.pinecones.find((item) => item.id === element.dataset.pineconeId);
         state.editingPineconeId = element.dataset.pineconeId;
-        state.activeShelfActionId = pinecone?.status === "temp" ? "temp" : pinecone?.shelfId || null;
-        render();
-      }
-      if (action === "toggle-shelf-actions") {
-        const shelfId = element.dataset.shelfId;
-        state.activeShelfActionId = state.activeShelfActionId === shelfId ? null : shelfId;
-        state.editingPineconeId = null;
         render();
       }
       if (action === "cancel-pinecone-edit") {
         state.editingPineconeId = null;
-        state.activeShelfActionId = null;
         render();
       }
       if (action === "save-pinecone") {
@@ -797,33 +709,11 @@ function bindEvents() {
     }
   });
 
-  document.querySelectorAll("input[name='add-destination']").forEach((input) => {
-    input.addEventListener("change", () => {
-      state.addDestination = input.value;
-      render();
-    });
-  });
-
-  document.querySelector("[data-input='selected-shelf']")?.addEventListener("change", (event) => {
-    state.selectedShelfId = event.target.value;
-  });
-
-  document.querySelector("[data-input='new-shelf-name']")?.addEventListener("input", (event) => {
-    state.newShelfName = event.target.value;
-  });
-
   document.querySelector("[data-input='shelf-search']")?.addEventListener("input", (event) => {
     state.shelfQuery = event.target.value;
     render();
   });
 
-  document.querySelectorAll("[data-action='move-pinecone']").forEach((select) => {
-    select.addEventListener("change", () => {
-      movePinecone(select.dataset.pineconeId, select.value);
-      state.activeShelfActionId = null;
-      render();
-    });
-  });
 
   bindWarehouseDragEvents();
 }
@@ -857,6 +747,7 @@ function jumpToSection(index) {
 function bindWarehouseDragEvents() {
   document.querySelectorAll("[data-warehouse-card]").forEach((card) => {
     card.addEventListener("pointerdown", (event) => {
+      if (state.organizingWarehouseId) return;
       if (touchWarehouseDrag) {
         if (event.pointerType === "touch") {
           event.preventDefault();
@@ -884,6 +775,10 @@ function bindWarehouseDragEvents() {
     }, { capture: true });
 
     card.addEventListener("dragstart", (event) => {
+      if (state.organizingWarehouseId) {
+        event.preventDefault();
+        return;
+      }
       if (warehouseDragStartedFromButton) {
         event.preventDefault();
         return;
@@ -1090,123 +985,40 @@ function clearWarehouseDragState() {
   });
 }
 
-function openIconPicker(warehouseId) {
-  const input = document.querySelector("#warehouse-icon-file");
-  if (!input) return;
-  input.dataset.warehouseId = warehouseId;
-  input.value = "";
-  input.click();
-}
-
-function handleIconFileSelected(event) {
-  const file = event.target.files?.[0];
-  const warehouseId = event.target.dataset.warehouseId;
-  if (!file || !warehouseId) return;
-  if (!file.type.startsWith("image/")) {
-    showToast("请选择图片文件。");
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.addEventListener("load", () => {
-    state.iconCrop = {
-      warehouseId,
-      dataUrl: String(reader.result),
-      offsetX: 0,
-      offsetY: 0,
-      zoom: 100,
-    };
-    render();
-  });
-  reader.readAsDataURL(file);
-}
-
-function updateIconCrop(key, value) {
-  if (!state.iconCrop) return;
-  state.iconCrop = { ...state.iconCrop, [key]: value };
-  render();
-}
-
-async function saveWarehouseIcon() {
-  if (!state.iconCrop) return;
-  const warehouse = hydrateWarehouseRecord(state, state.iconCrop.warehouseId);
-  if (!warehouse) return;
-
-  const image = await loadImage(state.iconCrop.dataUrl);
-  const canvas = document.createElement("canvas");
-  const size = 256;
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, size, size);
-  context.save();
-  context.beginPath();
-  context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-  context.clip();
-  const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight) * (state.iconCrop.zoom / 100);
-  const drawWidth = image.naturalWidth * scale;
-  const drawHeight = image.naturalHeight * scale;
-  const drawX = (size - drawWidth) / 2 + state.iconCrop.offsetX;
-  const drawY = (size - drawHeight) / 2 + state.iconCrop.offsetY;
-  context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
-  context.restore();
-
-  warehouse.iconDataUrl = canvas.toDataURL("image/png");
-  warehouse.updatedAt = nowText();
-  state.iconCrop = null;
-  commitWarehouse(warehouse);
-  saveState();
-  showToast("松果仓图标已保存。");
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = src;
-  });
-}
-
 function toggleDocumentEdit() {
+  if (isActiveWarehouseOrganizing()) return;
   if (state.editMode) {
     saveDocumentEdits();
     return;
   }
 
   state.editMode = true;
+  state.documentDraft = hydrateWarehouseRecord(state, state.activeWarehouseId);
   state.addOpen = false;
   render();
 }
 
 function updateDocumentDraft(field) {
-  const warehouse = getActiveWarehouse();
-  const section = warehouse.reviewDocument.sections[Number(field.dataset.sectionIndex)];
-  if (!section) return;
+  if (!state.documentDraft) return;
   const value = field.textContent.trim().replace(/^\d+\.\s*/, "");
-
-  if (field.dataset.editField === "heading") {
-    section.heading = value || section.heading;
-  }
-  if (field.dataset.editField === "summary") {
-    section.summary = value;
-  }
-  if (field.dataset.editField === "bullet") {
-    const bullet = section.bullets[Number(field.dataset.bulletIndex)];
-    if (bullet) bullet.text = value;
-  }
-  warehouse.updatedAt = nowText();
+  state.documentDraft = applyDocumentEdit(state.documentDraft, {
+    field: field.dataset.editField,
+    sectionIndex: Number(field.dataset.sectionIndex),
+    bulletIndex: Number(field.dataset.bulletIndex),
+  }, value);
+  state.documentDraft.updatedAt = nowText();
 }
 
 function saveDocumentEdits() {
-  const warehouse = getActiveWarehouse();
-  if (warehouse) commitWarehouse(warehouse);
+  if (state.documentDraft) commitWarehouse(state.documentDraft);
   state.editMode = false;
+  state.documentDraft = null;
   saveState();
   showToast("复盘文档已保存。");
 }
 
 function addPinecone() {
+  if (isActiveWarehouseOrganizing()) return;
   const warehouse = getActiveWarehouse();
   const content = state.newPineconeText.trim();
   if (!content) {
@@ -1214,88 +1026,25 @@ function addPinecone() {
     return;
   }
 
-  let status = "temp";
-  let shelfId = null;
-  let shelfName = "暂存栏";
-
-  if (state.addDestination === "existing") {
-    const shelf = warehouse.shelves.find((item) => item.id === (state.selectedShelfId || warehouse.shelves[0]?.id));
-    if (!shelf) {
-      showToast("请先选择一个素材栏。");
-      return;
-    }
-    status = "shelved";
-    shelfId = shelf.id;
-    shelfName = shelf.name;
-  }
-
-  if (state.addDestination === "new") {
-    const name = state.newShelfName.trim();
-    if (!name) {
-      showToast("请填写新素材栏名称。");
-      return;
-    }
-    const newShelf = {
-      id: uid("shelf"),
-      name,
-      description: `围绕“${name}”补充的原始松果。`,
-    };
-    warehouse.shelves.push(newShelf);
-    status = "shelved";
-    shelfId = newShelf.id;
-    shelfName = newShelf.name;
-  }
-
   warehouse.pinecones.unshift({
     id: uid("pinecone"),
     content,
-    status,
-    shelfId,
+    status: "temp",
+    shelfId: null,
     isFeatured: false,
     createdAt: nowText().replace(" 更新", ""),
   });
 
-  if (status === "shelved") {
-    updateReviewSectionForShelf(warehouse, shelfId);
-  }
-
   warehouse.updatedAt = nowText();
   state.newPineconeText = "";
-  state.newShelfName = "";
-  state.addDestination = "temp";
-  state.selectedShelfId = "";
   state.addOpen = false;
   commitWarehouse(warehouse);
   saveState();
-  showToast(status === "temp" ? "已放入暂存栏。" : `已放入“${shelfName}”，对应文档分区已更新。`);
-}
-
-function movePinecone(pineconeId, destinationId) {
-  const warehouse = getActiveWarehouse();
-  const pinecone = warehouse.pinecones.find((item) => item.id === pineconeId);
-  if (!pinecone) return;
-  const previousShelfId = pinecone.shelfId;
-
-  if (destinationId === "temp") {
-    pinecone.status = "temp";
-    pinecone.shelfId = null;
-  } else {
-    pinecone.status = "shelved";
-    pinecone.shelfId = destinationId;
-    updateReviewSectionForShelf(warehouse, destinationId);
-  }
-
-  if (previousShelfId && previousShelfId !== destinationId) {
-    updateReviewSectionForShelf(warehouse, previousShelfId);
-  }
-
-  warehouse.updatedAt = nowText();
-  commitWarehouse(warehouse);
-  saveState();
-  showToast(destinationId === "temp" ? "已移动到暂存栏。" : "已移动到素材栏，对应分区已更新。");
+  showToast("已放入暂存栏。");
 }
 
 function savePineconeEdit(pineconeId) {
+  if (isActiveWarehouseOrganizing()) return;
   const warehouse = getActiveWarehouse();
   const pinecone = warehouse.pinecones.find((item) => item.id === pineconeId);
   const input = document.querySelector(`[data-input='pinecone-edit'][data-pinecone-id="${pineconeId}"]`);
@@ -1307,34 +1056,40 @@ function savePineconeEdit(pineconeId) {
   }
 
   pinecone.content = nextContent;
-  if (pinecone.status === "shelved") updateReviewSectionForShelf(warehouse, pinecone.shelfId);
   warehouse.updatedAt = nowText();
   state.editingPineconeId = null;
-  state.activeShelfActionId = null;
   commitWarehouse(warehouse);
   saveState();
   showToast("松果已更新。");
 }
 
 function deletePinecone(pineconeId) {
+  if (isActiveWarehouseOrganizing()) return;
   const warehouse = getActiveWarehouse();
   const pinecone = warehouse.pinecones.find((item) => item.id === pineconeId);
   if (!pinecone) return;
 
   warehouse.pinecones = warehouse.pinecones.filter((item) => item.id !== pineconeId);
-  warehouse.reviewDocument.sections.forEach((section) => {
-    section.bullets = section.bullets.filter((bullet) => !bullet.pineconeIds?.includes(pineconeId));
-  });
-  if (pinecone.status === "shelved") updateReviewSectionForShelf(warehouse, pinecone.shelfId);
   warehouse.updatedAt = nowText();
   state.editingPineconeId = null;
-  state.activeShelfActionId = null;
   commitWarehouse(warehouse);
   saveState();
   showToast("松果已删除。");
 }
 
+function toggleFeaturedPinecone(pineconeId) {
+  if (isActiveWarehouseOrganizing()) return;
+  const warehouse = getActiveWarehouse();
+  if (!warehouse?.pinecones.some(({ id }) => id === pineconeId)) return;
+  const next = togglePineconeFeatured(warehouse, pineconeId);
+  next.updatedAt = nowText();
+  commitWarehouse(next);
+  saveState();
+  render();
+}
+
 function deleteWarehouse(warehouseId) {
+  if (isWarehouseReadOnly(state.organizingWarehouseId, warehouseId)) return;
   const warehouse = hydrateWarehouseRecord(state, warehouseId);
   if (!warehouse) return;
 
@@ -1359,10 +1114,9 @@ function resetWarehouseTransientState() {
   state.query = "";
   state.addOpen = false;
   state.editMode = false;
-  state.iconCrop = null;
+  state.documentDraft = null;
   state.shelfOpen = false;
   state.editingPineconeId = null;
-  state.activeShelfActionId = null;
   state.warehouseDialog = null;
 }
 
@@ -1403,61 +1157,69 @@ function confirmCreateWarehouse() {
   showToast("松果仓已创建。");
 }
 
-async function organizeWarehouse(mode = "existing") {
-  const warehouse = getActiveWarehouse();
-  const tempCount = warehouse.pinecones.filter((pinecone) => pinecone.status === "temp").length;
-  if (tempCount === 0 && mode === "existing") {
-    showToast("暂存栏里还没有新松果。");
-    return;
-  }
-
+async function organizeWarehouse(warehouseId) {
+  const warehouse = hydrateWarehouseRecord(state, warehouseId);
+  if (!warehouse) throw new Error("WAREHOUSE_NOT_FOUND");
   const result = USE_API_ORGANIZER
-    ? await organizeWarehouseWithApi(warehouse, mode)
-    : organizeWarehouseWithMock(warehouse, mode);
+    ? await organizeWarehouseWithApi(warehouse)
+    : organizeWarehouseWithMock(warehouse);
 
   Object.assign(warehouse, result);
   warehouse.updatedAt = nowText();
   commitWarehouse(warehouse);
   saveState();
-  showToast(mode === "reorganize" ? "已全部重新整理，复盘文档已更新。" : `${tempCount} 颗松果已放入素材栏。`);
+  showToast("已全部重新整理，复盘文档已更新。");
 }
 
-async function organizeWarehouseWithApi(_warehouse, _mode) {
+async function organizeWarehouseWithApi(_warehouse) {
   throw new Error("API organizer is reserved. Replace this function with an OpenAI API call.");
 }
 
-function organizeWarehouseWithMock(warehouse, mode) {
-  return organizeWarehouseLocally(warehouse, mode);
+function organizeWarehouseWithMock(warehouse) {
+  return organizeWarehouseLocally(warehouse);
 }
 
-function updateReviewSectionForShelf(warehouse, shelfId) {
-  const shelf = warehouse.shelves.find((item) => item.id === shelfId);
-  if (!shelf) return;
-  const pinecones = warehouse.pinecones.filter((pinecone) => pinecone.status === "shelved" && pinecone.shelfId === shelfId);
-  const nextSection = {
-    shelfId: shelf.id,
-    heading: shelf.name,
-    summary: shelf.description,
-    bullets: pinecones.slice(0, 4).map((pinecone) => ({
-      text: summarizePinecone(pinecone.content),
-      pineconeIds: [pinecone.id],
-    })),
-  };
-  const index = warehouse.reviewDocument.sections.findIndex((section) => section.shelfId === shelfId);
-  if (index >= 0) {
-    warehouse.reviewDocument.sections[index] = nextSection;
-  } else {
-    warehouse.reviewDocument.sections.push(nextSection);
+function requestWarehouseReorganization() {
+  if (!canStartWarehouseOrganization(state.organizingWarehouseId)) {
+    showToast("已有仓库正在整理，请等待当前任务完成。");
+    return;
+  }
+  const warehouse = getActiveWarehouse();
+  if (!warehouse || warehouse.pinecones.length === 0) {
+    showToast("仓库里还没有松果。");
+    return;
+  }
+  state.warehouseDialog = { type: "reorganize", warehouseId: warehouse.id };
+  render();
+}
+
+async function confirmWarehouseReorganization() {
+  if (state.warehouseDialog?.type !== "reorganize") return;
+  if (!canStartWarehouseOrganization(state.organizingWarehouseId)) return;
+  const warehouseId = state.warehouseDialog.warehouseId;
+  if (state.documentDraft?.id === warehouseId) {
+    commitWarehouse(state.documentDraft);
+    saveState();
+  }
+  state.warehouseDialog = null;
+  state.organizingWarehouseId = warehouseId;
+  state.editMode = false;
+  state.documentDraft = null;
+  state.addOpen = false;
+  state.editingPineconeId = null;
+  render();
+  try {
+    await organizeWarehouse(warehouseId);
+  } catch {
+    showToast("整理失败，当前文档和松果架保持原样，请稍后重试。");
+  } finally {
+    if (state.organizingWarehouseId === warehouseId) state.organizingWarehouseId = null;
+    render();
   }
 }
 
 function buildReviewDocument(title, sections) {
   return { title, sections };
-}
-
-function summarizePinecone(content) {
-  const clean = content.replace(/\s+/g, " ").trim();
-  return clean.length > 42 ? `${clean.slice(0, 42)}。` : clean;
 }
 
 function getFilteredSections(warehouse) {

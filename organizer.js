@@ -123,11 +123,9 @@ const GENERAL_PROFILE = {
 
 const PROFILES = [PRODUCT_MANAGER_PROFILE, HUMAN_NATURE_PROFILE, GENERAL_PROFILE];
 
-export function organizeWarehouseLocally(warehouse, mode = "reorganize") {
+export function organizeWarehouseLocally(warehouse) {
   const working = structuredClone(warehouse);
-  const targetPinecones = mode === "reorganize"
-    ? working.pinecones
-    : working.pinecones.filter((pinecone) => pinecone.status === "temp");
+  const targetPinecones = working.pinecones;
 
   if (!targetPinecones.length) return working;
 

@@ -27,12 +27,16 @@ function idsEqual(left, right) {
 
 export function normalizeWarehouseState(source, version) {
   if (source?.warehouses?.byId && Array.isArray(source?.warehouses?.order)) {
+    const byId = Object.fromEntries(Object.entries(source.warehouses.byId).map(([id, warehouse]) => {
+      const { iconDataUrl: _iconDataUrl, ...metadata } = warehouse;
+      return [id, metadata];
+    }));
     return {
       ...source,
       version,
       warehouses: {
-        byId: { ...source.warehouses.byId },
-        order: source.warehouses.order.filter((id) => source.warehouses.byId[id]),
+        byId,
+        order: source.warehouses.order.filter((id) => byId[id]),
       },
       documents: { byWarehouseId: { ...(source.documents?.byWarehouseId || {}) } },
       shelves: { byWarehouseId: { ...(source.shelves?.byWarehouseId || {}) } },
@@ -55,7 +59,6 @@ export function normalizeWarehouseState(source, version) {
       name: warehouse.name || "未命名松鼠仓",
       updatedAt: warehouse.updatedAt || "",
       tempLimit: warehouse.tempLimit || 5,
-      ...(meta.iconDataUrl ? { iconDataUrl: meta.iconDataUrl } : {}),
     };
     order.push(warehouse.id);
     documentsByWarehouseId[warehouse.id] = structuredClone(reviewDocument || { title: warehouse.name || "未命名松鼠仓", sections: [] });
@@ -76,6 +79,56 @@ export function normalizeWarehouseState(source, version) {
     shelves: { byWarehouseId: shelvesByWarehouseId },
     pinecones: { byWarehouseId: pineconesByWarehouseId },
   };
+}
+
+export function getWarehouseColor(name) {
+  const colors = ["moss", "clay", "sky", "plum"];
+  const paletteIndex = [...String(name || "")]
+    .reduce((total, character) => total + character.codePointAt(0), 0) % colors.length;
+  return colors[paletteIndex];
+}
+
+export function applyDocumentEdit(warehouse, edit, value) {
+  const next = structuredClone(warehouse);
+  const section = next.reviewDocument?.sections?.[edit.sectionIndex];
+  if (!section) return next;
+
+  if (edit.field === "heading") section.heading = value || section.heading;
+  if (edit.field === "summary") section.summary = value;
+  if (edit.field === "bullet") {
+    const bullet = section.bullets?.[edit.bulletIndex];
+    if (bullet) bullet.text = value;
+  }
+  return next;
+}
+
+export function togglePineconeFeatured(warehouse, pineconeId) {
+  const next = structuredClone(warehouse);
+  const pinecone = next.pinecones?.find(({ id }) => id === pineconeId);
+  if (pinecone) pinecone.isFeatured = !pinecone.isFeatured;
+  return next;
+}
+
+export function deriveShelfSections(warehouse) {
+  const pineconesById = new Map((warehouse.pinecones || []).map((pinecone) => [pinecone.id, pinecone]));
+  return (warehouse.reviewDocument?.sections || []).map((section) => {
+    const ids = [...new Set((section.bullets || []).flatMap((bullet) => bullet.pineconeIds || []))];
+    return {
+      id: section.shelfId,
+      name: section.heading,
+      description: section.summary,
+      pinecones: ids.map((id) => pineconesById.get(id)).filter(Boolean),
+      isTemporary: false,
+    };
+  });
+}
+
+export function isWarehouseReadOnly(organizingWarehouseId, warehouseId) {
+  return Boolean(organizingWarehouseId) && organizingWarehouseId === warehouseId;
+}
+
+export function canStartWarehouseOrganization(organizingWarehouseId) {
+  return !organizingWarehouseId;
 }
 
 export function getWarehouseRecords(state) {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createEmptyWarehouseRecord, getWarehouseRecords, normalizeWarehouseState, removeWarehouse, removeWarehouseRecord, reorderWarehouses, reorderWarehouseRecords, useOnlyExampleWarehouses } from "./warehouse-management.js";
+import { applyDocumentEdit, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, isWarehouseReadOnly, normalizeWarehouseState, removeWarehouse, removeWarehouseRecord, reorderWarehouses, reorderWarehouseRecords, togglePineconeFeatured, useOnlyExampleWarehouses } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 
 const ids = (items) => items.map((item) => item.id);
@@ -70,6 +70,64 @@ test("normalizeWarehouseState separates each warehouse document shelves and pine
   assert.deepEqual(normalized.pinecones.byWarehouseId.b.map((pinecone) => pinecone.id), ["pb"]);
   assert.equal(normalized.warehouses.byId.a.reviewDocument, undefined);
   assert.equal(normalized.warehouses.byId.a.pinecones, undefined);
+  assert.equal(normalized.warehouses.byId.a.iconDataUrl, undefined);
+});
+
+test("getWarehouseColor derives a stable built-in palette name", () => {
+  assert.equal(getWarehouseColor("研究"), getWarehouseColor("研究"));
+  assert.match(getWarehouseColor("研究"), /^(moss|clay|sky|plum)$/);
+});
+
+test("applyDocumentEdit preserves a document draft without mutating the stored warehouse", () => {
+  const warehouse = {
+    reviewDocument: {
+      title: "文档",
+      sections: [{ heading: "旧标题", summary: "旧摘要", bullets: [{ text: "旧要点", pineconeIds: ["p1"] }] }],
+    },
+  };
+  const headingDraft = applyDocumentEdit(warehouse, { field: "heading", sectionIndex: 0 }, "新标题");
+  const completedDraft = applyDocumentEdit(headingDraft, { field: "bullet", sectionIndex: 0, bulletIndex: 0 }, "新要点");
+
+  assert.equal(warehouse.reviewDocument.sections[0].heading, "旧标题");
+  assert.equal(completedDraft.reviewDocument.sections[0].heading, "新标题");
+  assert.equal(completedDraft.reviewDocument.sections[0].bullets[0].text, "新要点");
+});
+
+test("togglePineconeFeatured toggles temporary and shelved pinecones without mutation", () => {
+  const warehouse = { pinecones: [{ id: "temp", status: "temp", isFeatured: false }, { id: "shelved", status: "shelved", isFeatured: true }] };
+  const first = togglePineconeFeatured(warehouse, "temp");
+  const second = togglePineconeFeatured(first, "shelved");
+
+  assert.equal(warehouse.pinecones[0].isFeatured, false);
+  assert.equal(second.pinecones.find(({ id }) => id === "temp").isFeatured, true);
+  assert.equal(second.pinecones.find(({ id }) => id === "shelved").isFeatured, false);
+});
+
+test("deriveShelfSections follows document pinecone ids instead of stale shelf ids", () => {
+  const warehouse = {
+    pinecones: [
+      { id: "p1", shelfId: "stale", content: "第一条" },
+      { id: "p2", shelfId: "section-a", content: "第二条" },
+      { id: "p3", shelfId: "section-a", content: "未引用" },
+    ],
+    reviewDocument: {
+      sections: [{ shelfId: "section-a", heading: "章节", summary: "摘要", bullets: [{ pineconeIds: ["p1", "p2", "p1"] }] }],
+    },
+  };
+
+  const sections = deriveShelfSections(warehouse);
+  assert.deepEqual(sections[0].pinecones.map(({ id }) => id), ["p1", "p2"]);
+});
+
+test("isWarehouseReadOnly locks only the warehouse with an active organization", () => {
+  assert.equal(isWarehouseReadOnly("a", "a"), true);
+  assert.equal(isWarehouseReadOnly("a", "b"), false);
+  assert.equal(isWarehouseReadOnly(null, "a"), false);
+});
+
+test("canStartWarehouseOrganization enforces one active job across warehouses", () => {
+  assert.equal(canStartWarehouseOrganization(null), true);
+  assert.equal(canStartWarehouseOrganization("a"), false);
 });
 
 test("getWarehouseRecords hydrates isolated records without sharing nested data", () => {
@@ -138,10 +196,7 @@ test("reorderWarehouseRecords only changes order metadata", () => {
 
 test("example warehouses preserve messy source fragments and produce structured documents", () => {
   assert.deepEqual(exampleWarehouses.map((warehouse) => warehouse.name), ["《如何成为产品经理》", "《人性的弱点摘抄》"]);
-  assert.deepEqual(exampleWarehouses.map((warehouse) => warehouse.iconDataUrl), [
-    "assets/illustrations/warehouse-icon-product-manager.png",
-    "assets/illustrations/warehouse-icon-human-nature.png",
-  ]);
+  assert.equal(exampleWarehouses.some((warehouse) => "iconDataUrl" in warehouse), false);
 
   for (const warehouse of exampleWarehouses) {
     assert.equal(warehouse.pinecones.length, 40);
