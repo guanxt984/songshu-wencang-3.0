@@ -1,0 +1,19 @@
+{
+  "warehouse": {
+    "states": ["ready", "organizing"],
+    "transitions": ["ready:organizing", "organizing:ready"],
+    "userWritableStates": ["ready"]
+  },
+  "aiJob": {
+    "states": ["queued", "running", "succeeded", "failed", "expired"],
+    "transitions": [
+      "queued:running",
+      "queued:failed",
+      "queued:expired",
+      "running:succeeded",
+      "running:failed",
+      "running:expired"
+    ],
+    "terminalStates": ["succeeded", "failed", "expired"]
+  }
+}

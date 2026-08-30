@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://songshu.example/contracts/ai-organize-request-v1.json",
+  "title": "AI organize request v1",
+  "type": "object",
+  "required": ["warehouseId", "revision", "idempotencyKey", "pinecones"],
+  "additionalProperties": false,
+  "properties": {
+    "warehouseId": { "type": "string", "minLength": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "pinecones": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": ["id", "content"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "content": { "type": "string", "maxLength": 4000 }
+        }
+      }
+    }
+  }
+}

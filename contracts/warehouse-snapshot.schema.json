@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://songshu.example/contracts/warehouse-snapshot-v1.json",
+  "title": "Warehouse snapshot v1",
+  "type": "object",
+  "required": ["schema_version", "name", "document", "shelves", "pinecones"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "document": { "type": "object" },
+    "shelves": { "type": "array" },
+    "pinecones": { "type": "array" }
+  }
+}

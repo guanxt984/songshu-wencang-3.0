@@ -1,0 +1,18 @@
+{
+  "AUTH_REQUIRED": { "httpStatus": 401, "message": "登录状态已失效，请重新登录" },
+  "FORBIDDEN": { "httpStatus": 403, "message": "无权访问此资源" },
+  "CSRF_INVALID": { "httpStatus": 403, "message": "请求验证失败，请刷新后重试" },
+  "VALIDATION_FAILED": { "httpStatus": 422, "message": "提交内容格式不正确" },
+  "REVISION_CONFLICT": { "httpStatus": 409, "message": "内容已在其他设备更新" },
+  "WAREHOUSE_ORGANIZING": { "httpStatus": 409, "message": "仓库正在重新整理，请稍后刷新" },
+  "WAREHOUSE_LIMIT_REACHED": { "httpStatus": 409, "message": "每个账号最多创建 10 个仓库" },
+  "AI_INPUT_EMPTY": { "httpStatus": 422, "message": "请先添加至少一条松果" },
+  "AI_INPUT_ITEM_TOO_LARGE": { "httpStatus": 422, "message": "单条松果内容过长" },
+  "AI_INPUT_TOO_LARGE": { "httpStatus": 422, "message": "本次整理材料总量过大" },
+  "AI_INPUT_TOO_MANY_ITEMS": { "httpStatus": 422, "message": "本次整理松果数量过多" },
+  "AI_OUTPUT_SCHEMA_INVALID": { "httpStatus": 502, "message": "整理结果格式异常，请重试" },
+  "AI_OUTPUT_PINECONE_ASSIGNMENT_INVALID": { "httpStatus": 502, "message": "整理结果未能完整归类材料，请重试" },
+  "AI_QUOTA_EXCEEDED": { "httpStatus": 429, "message": "今日整理次数已用完" },
+  "AI_JOB_ACTIVE": { "httpStatus": 409, "message": "当前账号已有整理任务进行中" },
+  "REQUEST_TOO_LARGE": { "httpStatus": 413, "message": "请求内容过大" }
+}
