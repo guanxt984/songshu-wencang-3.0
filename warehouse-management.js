@@ -1,3 +1,27 @@
+export const BUILT_IN_WAREHOUSE_AVATARS = [
+  "squirrel-library-warehouse-logo.png",
+  "squirrel-warehouse-logo-simple.png",
+  "achang-doc.png",
+  "achang-wave.png",
+  "decor-pinecone-doc.png",
+  "pinecone-warehouse-icon.png",
+  "warehouse-icon-human-nature.png",
+  "warehouse-icon-product-manager.png",
+];
+
+export function validateWarehouseAvatarFile(file) {
+  if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    return "仅支持 PNG、JPEG 或 WebP 图片";
+  }
+  if (file.size > 2 * 1024 * 1024) return "图片不能超过 2MB";
+  return "";
+}
+
+export function isWarehouseAvatarSource(source) {
+  return BUILT_IN_WAREHOUSE_AVATARS.includes(source)
+    || /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(String(source || ""));
+}
+
 export function reorderWarehouses(warehouses, sourceId, targetId, placement) {
   const sourceIndex = warehouses.findIndex((item) => item.id === sourceId);
   const targetIndex = warehouses.findIndex((item) => item.id === targetId);

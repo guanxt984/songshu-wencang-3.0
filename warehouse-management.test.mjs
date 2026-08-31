@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { applyDocumentEdit, applyPineconeEdits, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, isWarehouseReadOnly, normalizeWarehouseState, removeWarehouse, removeWarehouseRecord, reorderWarehouses, reorderWarehouseRecords, useOnlyExampleWarehouses } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
+import * as warehouseModule from "./warehouse-management.js";
 
 const ids = (items) => items.map((item) => item.id);
 const warehouses = [{ id: "a" }, { id: "b" }, { id: "c" }];
@@ -196,6 +197,21 @@ test("createEmptyWarehouseRecord initializes independent empty document shelf an
   assert.deepEqual(record.pinecones, []);
   assert.equal(record.document.sections[0].shelfId, "ideas");
   assert.equal(Object.hasOwn(record.warehouse, "tempLimit"), false);
+});
+
+test("custom warehouse avatar validation accepts supported images and rejects unsafe uploads", () => {
+  assert.equal(typeof warehouseModule.validateWarehouseAvatarFile, "function");
+  assert.equal(warehouseModule.validateWarehouseAvatarFile({ type: "image/png", size: 2 * 1024 * 1024 }), "");
+  assert.equal(warehouseModule.validateWarehouseAvatarFile({ type: "image/gif", size: 1024 }), "仅支持 PNG、JPEG 或 WebP 图片");
+  assert.equal(warehouseModule.validateWarehouseAvatarFile({ type: "image/jpeg", size: 2 * 1024 * 1024 + 1 }), "图片不能超过 2MB");
+});
+
+test("warehouse avatar source permits built-ins and safe image data only", () => {
+  assert.equal(typeof warehouseModule.isWarehouseAvatarSource, "function");
+  assert.equal(warehouseModule.isWarehouseAvatarSource("achang-wave.png"), true);
+  assert.equal(warehouseModule.isWarehouseAvatarSource("data:image/webp;base64,AAAA"), true);
+  assert.equal(warehouseModule.isWarehouseAvatarSource("data:text/html;base64,AAAA"), false);
+  assert.equal(warehouseModule.isWarehouseAvatarSource("https://example.com/avatar.png"), false);
 });
 
 test("reorderWarehouseRecords only changes order metadata", () => {

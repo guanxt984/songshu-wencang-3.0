@@ -1,4 +1,4 @@
-import { applyDocumentEdit, applyPineconeEdits, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hydrateWarehouseRecord, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, useOnlyExampleWarehouses } from "./warehouse-management.js";
+import { applyDocumentEdit, applyPineconeEdits, BUILT_IN_WAREHOUSE_AVATARS, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hydrateWarehouseRecord, isWarehouseAvatarSource, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, useOnlyExampleWarehouses, validateWarehouseAvatarFile } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 import { organizeWarehouseLocally } from "./organizer.js";
 
@@ -9,16 +9,6 @@ const TOUCH_DRAG_MOVE_THRESHOLD = 8;
 const WAREHOUSE_AUTO_SCROLL_EDGE = 56;
 const WAREHOUSE_AUTO_SCROLL_SPEED = 10;
 
-const WAREHOUSE_AVATARS = [
-  "squirrel-library-warehouse-logo.png",
-  "squirrel-warehouse-logo-simple.png",
-  "achang-doc.png",
-  "achang-wave.png",
-  "decor-pinecone-doc.png",
-  "pinecone-warehouse-icon.png",
-  "warehouse-icon-human-nature.png",
-  "warehouse-icon-product-manager.png",
-];
 const OFFICIAL_WAREHOUSE_AVATARS = {
   example_product_manager: "warehouse-icon-product-manager.png",
   example_human_nature: "warehouse-icon-human-nature.png",
@@ -405,8 +395,11 @@ function renderWarehouseCard(warehouse) {
 
 function renderWarehouseIcon(warehouse) {
   const avatar = OFFICIAL_WAREHOUSE_AVATARS[warehouse.id] || warehouse.avatar;
-  if (WAREHOUSE_AVATARS.includes(avatar)) {
+  if (BUILT_IN_WAREHOUSE_AVATARS.includes(avatar)) {
     return asset(avatar, "warehouse-icon warehouse-custom-avatar");
+  }
+  if (isWarehouseAvatarSource(avatar)) {
+    return `<img class="warehouse-icon warehouse-custom-avatar" src="${avatar}" alt="" aria-hidden="true">`;
   }
   const color = warehouse.id.startsWith("example_") ? "wood" : getWarehouseColor(warehouse.name);
   return asset("pinecone-warehouse-icon.png", `warehouse-icon warehouse-color-${color}`);
@@ -450,13 +443,24 @@ function renderWarehouseDialog() {
           <fieldset class="warehouse-avatar-picker">
             <legend>选择头像</legend>
             <div class="warehouse-avatar-options">
-              ${WAREHOUSE_AVATARS.map((avatar, index) => `
+              ${BUILT_IN_WAREHOUSE_AVATARS.map((avatar, index) => `
                 <label class="warehouse-avatar-option" title="头像 ${index + 1}">
-                  <input type="radio" name="warehouse-avatar" data-input="warehouse-avatar" value="${avatar}" ${avatar === "pinecone-warehouse-icon.png" ? "checked" : ""}>
+                  <input type="radio" name="warehouse-avatar" data-input="warehouse-avatar" value="${avatar}" ${!dialog.customAvatar && avatar === "pinecone-warehouse-icon.png" ? "checked" : ""}>
                   ${asset(avatar, "warehouse-avatar-preview")}
                 </label>
               `).join("")}
+              ${dialog.customAvatar ? `
+                <label class="warehouse-avatar-option warehouse-custom-upload-preview" title="自定义头像">
+                  <input type="radio" name="warehouse-avatar" data-input="warehouse-avatar" value="__custom__" checked>
+                  <img class="warehouse-avatar-preview" src="${dialog.customAvatar}" alt="自定义头像预览">
+                </label>
+              ` : ""}
             </div>
+            <label class="warehouse-avatar-upload">
+              <input type="file" data-input="warehouse-avatar-upload" accept="image/png,image/jpeg,image/webp">
+              <span>${dialog.customAvatar ? "重新上传图片" : "上传自己的图片"}</span>
+              <small>PNG、JPEG 或 WebP，最大 2MB</small>
+            </label>
           </fieldset>
         ` : isReorganize ? `
           <fieldset class="organize-mode-options">
@@ -715,6 +719,10 @@ function bindEvents() {
       event.preventDefault();
       confirmCreateWarehouse();
     }
+  });
+
+  document.querySelector("[data-input='warehouse-avatar-upload']")?.addEventListener("change", async (event) => {
+    await readWarehouseAvatarFile(event.target.files?.[0]);
   });
 
   document.querySelector("[data-input='shelf-search']")?.addEventListener("input", (event) => {
@@ -1135,6 +1143,33 @@ function createWarehouse() {
   document.querySelector("[data-input='warehouse-name']")?.focus();
 }
 
+function readWarehouseAvatarFile(file) {
+  const error = validateWarehouseAvatarFile(file);
+  if (error) {
+    showToast(error);
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (state.warehouseDialog?.type !== "create" || !isWarehouseAvatarSource(reader.result)) {
+        showToast("无法读取这张图片，请更换后重试。");
+        resolve(false);
+        return;
+      }
+      state.warehouseDialog.customAvatar = reader.result;
+      render();
+      resolve(true);
+    });
+    reader.addEventListener("error", () => {
+      showToast("无法读取这张图片，请更换后重试。");
+      resolve(false);
+    });
+    reader.readAsDataURL(file);
+  });
+}
+
 function cancelWarehouseDialog() {
   state.warehouseDialog = null;
   render();
@@ -1152,7 +1187,10 @@ function confirmCreateWarehouse() {
   input.setCustomValidity("");
 
   const id = uid("warehouse");
-  const avatar = document.querySelector("[data-input='warehouse-avatar']:checked")?.value || "pinecone-warehouse-icon.png";
+  const avatarChoice = document.querySelector("[data-input='warehouse-avatar']:checked")?.value;
+  const avatar = avatarChoice === "__custom__"
+    ? state.warehouseDialog.customAvatar
+    : (avatarChoice || "pinecone-warehouse-icon.png");
   const record = createEmptyWarehouseRecord(id, name, nowText(), avatar);
   state = persistWarehouseRecord(state, {
     ...record.warehouse,
