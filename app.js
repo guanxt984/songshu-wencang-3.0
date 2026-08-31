@@ -1,4 +1,4 @@
-import { applyDocumentEdit, applyPineconeEdits, BUILT_IN_WAREHOUSE_AVATARS, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hydrateWarehouseRecord, isWarehouseAvatarSource, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, useOnlyExampleWarehouses, validateWarehouseAvatarFile } from "./warehouse-management.js";
+import { applyDocumentEdit, applyPineconeEdits, BUILT_IN_WAREHOUSE_AVATARS, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hasExceededWarehouseDragThreshold, hydrateWarehouseRecord, isWarehouseAvatarSource, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, useOnlyExampleWarehouses, validateWarehouseAvatarFile } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 import { organizeWarehouseLocally } from "./organizer.js";
 
@@ -6,6 +6,7 @@ const STORAGE_KEY = "squirrel-warehouse-mvp";
 const USE_API_ORGANIZER = false;
 const TOUCH_DRAG_HOLD_MS = 300;
 const TOUCH_DRAG_MOVE_THRESHOLD = 8;
+const MOUSE_DRAG_MOVE_THRESHOLD = 10;
 const WAREHOUSE_AUTO_SCROLL_EDGE = 56;
 const WAREHOUSE_AUTO_SCROLL_SPEED = 10;
 
@@ -165,9 +166,9 @@ let state = loadState();
 const app = document.querySelector("#app");
 const toast = document.querySelector("#toast");
 let draggedWarehouseId = "";
-let warehouseDragStartedFromButton = false;
 let touchWarehouseDrag = null;
 let warehouseAutoScrollFrame = 0;
+let suppressWarehouseClick = false;
 
 document.addEventListener("touchmove", preventActiveWarehouseTouchScroll, { passive: false });
 render();
@@ -377,7 +378,7 @@ function renderWarehouseCard(warehouse) {
   const displayName = stripBookTitleMarks(warehouse.name);
   return `
     <article class="warehouse-card ${active ? "active" : ""}"
-      data-warehouse-card="${warehouse.id}" draggable="${state.organizingWarehouseId ? "false" : "true"}">
+      data-warehouse-card="${warehouse.id}">
       <span class="warehouse-icon-button" aria-hidden="true">
         ${renderWarehouseIcon(warehouse)}
       </span>
@@ -623,21 +624,6 @@ function renderShelfPinecone(pinecone) {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-warehouse]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (state.shelfManaging && !saveAllManagedPinecones()) return;
-      state.activeWarehouseId = button.dataset.warehouse;
-      state.query = "";
-      state.addOpen = false;
-      state.editMode = false;
-      state.documentDraft = null;
-      state.shelfManaging = false;
-      state.pineconeDrafts = {};
-      saveState();
-      render();
-    });
-  });
-
   document.querySelectorAll("[data-action]").forEach((element) => {
     element.addEventListener("click", (event) => {
       const action = element.dataset.action;
@@ -741,6 +727,20 @@ function bindEvents() {
   bindWarehouseDragEvents();
 }
 
+function selectWarehouse(warehouseId) {
+  if (!warehouseId || warehouseId === state.activeWarehouseId) return;
+  if (state.shelfManaging && !saveAllManagedPinecones()) return;
+  state.activeWarehouseId = warehouseId;
+  state.query = "";
+  state.addOpen = false;
+  state.editMode = false;
+  state.documentDraft = null;
+  state.shelfManaging = false;
+  state.pineconeDrafts = {};
+  saveState();
+  render();
+}
+
 function toggleShelfDrawer() {
   state.shelfOpen = !state.shelfOpen;
   saveState();
@@ -770,6 +770,15 @@ function jumpToSection(index) {
 }
 function bindWarehouseDragEvents() {
   document.querySelectorAll("[data-warehouse-card]").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("[data-action='delete-warehouse']")) return;
+      if (suppressWarehouseClick) {
+        suppressWarehouseClick = false;
+        return;
+      }
+      selectWarehouse(card.dataset.warehouseCard);
+    });
+
     card.addEventListener("pointerdown", (event) => {
       if (state.organizingWarehouseId) return;
       if (touchWarehouseDrag) {
@@ -779,8 +788,7 @@ function bindWarehouseDragEvents() {
         }
         return;
       }
-      warehouseDragStartedFromButton = Boolean(event.target.closest("button"));
-      if (warehouseDragStartedFromButton || event.pointerType !== "touch") return;
+      if (event.target.closest("[data-action='delete-warehouse']")) return;
 
       touchWarehouseDrag = {
         pointerId: event.pointerId,
@@ -792,43 +800,30 @@ function bindWarehouseDragEvents() {
         targetId: "",
         placement: "before",
         active: false,
-        activationTimer: window.setTimeout(() => {
-          activateTouchWarehouseDrag(card, event.pointerId);
-        }, TOUCH_DRAG_HOLD_MS),
+        activationTimer: event.pointerType === "touch"
+          ? window.setTimeout(() => activateTouchWarehouseDrag(card, event.pointerId), TOUCH_DRAG_HOLD_MS)
+          : 0,
       };
     }, { capture: true });
 
-    card.addEventListener("dragstart", (event) => {
-      if (state.organizingWarehouseId) {
-        event.preventDefault();
-        return;
-      }
-      if (warehouseDragStartedFromButton) {
-        event.preventDefault();
-        return;
-      }
-      if (touchWarehouseDrag) {
-        event.preventDefault();
-        return;
-      }
-      draggedWarehouseId = card.dataset.warehouseCard;
-      card.classList.add("dragging");
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", draggedWarehouseId);
-    });
-
     card.addEventListener("pointermove", (event) => {
-      if (!touchWarehouseDrag || event.pointerId !== touchWarehouseDrag.pointerId || event.pointerType !== "touch") return;
+      if (!touchWarehouseDrag || event.pointerId !== touchWarehouseDrag.pointerId) return;
       touchWarehouseDrag.clientX = event.clientX;
       touchWarehouseDrag.clientY = event.clientY;
 
       if (!touchWarehouseDrag.active) {
-        const distance = Math.hypot(
-          event.clientX - touchWarehouseDrag.startX,
-          event.clientY - touchWarehouseDrag.startY,
+        const threshold = event.pointerType === "touch" ? TOUCH_DRAG_MOVE_THRESHOLD : MOUSE_DRAG_MOVE_THRESHOLD;
+        const exceeded = hasExceededWarehouseDragThreshold(
+          touchWarehouseDrag.startX,
+          touchWarehouseDrag.startY,
+          event.clientX,
+          event.clientY,
+          threshold,
         );
-        if (distance > TOUCH_DRAG_MOVE_THRESHOLD) {
+        if (event.pointerType === "touch" && exceeded) {
           clearWarehouseDragState();
+        } else if (event.pointerType !== "touch" && exceeded) {
+          activateTouchWarehouseDrag(card, event.pointerId);
         }
         return;
       }
@@ -839,12 +834,10 @@ function bindWarehouseDragEvents() {
     });
 
     card.addEventListener("pointerup", (event) => {
-      warehouseDragStartedFromButton = false;
       finishTouchWarehouseDrag(card, event, true);
     });
 
     card.addEventListener("pointercancel", (event) => {
-      warehouseDragStartedFromButton = false;
       finishTouchWarehouseDrag(card, event, false);
     });
 
@@ -854,27 +847,6 @@ function bindWarehouseDragEvents() {
       }
     });
 
-    card.addEventListener("dragover", (event) => {
-      if (!draggedWarehouseId || draggedWarehouseId === card.dataset.warehouseCard) return;
-      event.preventDefault();
-      clearWarehouseDropIndicators();
-      const rect = card.getBoundingClientRect();
-      card.classList.add(event.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
-    });
-
-    card.addEventListener("drop", (event) => {
-      event.preventDefault();
-      const placement = card.classList.contains("drop-after") ? "after" : "before";
-      const next = reorderWarehouseRecords(state, draggedWarehouseId, card.dataset.warehouseCard, placement);
-      if (next !== state) {
-        state = next;
-        saveState();
-        render();
-      }
-      clearWarehouseDragState();
-    });
-
-    card.addEventListener("dragend", clearWarehouseDragState);
   });
 }
 
@@ -973,12 +945,14 @@ function stopWarehouseAutoScroll() {
 }
 
 function finishTouchWarehouseDrag(card, event, shouldReorder) {
-  if (!touchWarehouseDrag || event.pointerId !== touchWarehouseDrag.pointerId || event.pointerType !== "touch") return;
+  if (!touchWarehouseDrag || event.pointerId !== touchWarehouseDrag.pointerId) return;
 
   const { sourceId, targetId, placement, active } = touchWarehouseDrag;
   if (active && card.hasPointerCapture(event.pointerId)) {
     card.releasePointerCapture(event.pointerId);
   }
+  suppressWarehouseClick = active;
+  if (active) window.setTimeout(() => { suppressWarehouseClick = false; }, 0);
   clearWarehouseDragState();
 
   if (!shouldReorder || !active || !targetId) return;
@@ -1002,7 +976,6 @@ function clearWarehouseDragState() {
   }
   stopWarehouseAutoScroll();
   draggedWarehouseId = "";
-  warehouseDragStartedFromButton = false;
   touchWarehouseDrag = null;
   document.querySelectorAll(".warehouse-card").forEach((card) => {
     card.classList.remove("dragging", "drop-before", "drop-after");

@@ -22,6 +22,10 @@ export function isWarehouseAvatarSource(source) {
     || /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(String(source || ""));
 }
 
+export function hasExceededWarehouseDragThreshold(startX, startY, clientX, clientY, threshold) {
+  return Math.hypot(clientX - startX, clientY - startY) > threshold;
+}
+
 export function reorderWarehouses(warehouses, sourceId, targetId, placement) {
   const sourceIndex = warehouses.findIndex((item) => item.id === sourceId);
   const targetIndex = warehouses.findIndex((item) => item.id === targetId);

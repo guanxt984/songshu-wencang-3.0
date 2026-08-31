@@ -225,7 +225,7 @@ img {
   background: rgba(255, 251, 240, 0.68);
 }
 
-.warehouse-card[draggable="true"] {
+.warehouse-card {
   cursor: grab;
   touch-action: pan-x pan-y;
 }

@@ -214,6 +214,12 @@ test("warehouse avatar source permits built-ins and safe image data only", () =>
   assert.equal(warehouseModule.isWarehouseAvatarSource("https://example.com/avatar.png"), false);
 });
 
+test("warehouse drag starts only after pointer movement exceeds the threshold", () => {
+  assert.equal(typeof warehouseModule.hasExceededWarehouseDragThreshold, "function");
+  assert.equal(warehouseModule.hasExceededWarehouseDragThreshold(10, 10, 17, 17, 10), false);
+  assert.equal(warehouseModule.hasExceededWarehouseDragThreshold(10, 10, 18, 18, 10), true);
+});
+
 test("reorderWarehouseRecords only changes order metadata", () => {
   const normalized = normalizeWarehouseState({
     activeWarehouseId: "a",

@@ -46,13 +46,13 @@ const expectations = [
   ["warehouse delete action", "data-action=\"delete-warehouse\""],
   ["warehouse empty state", "renderEmptyWarehouseState"],
   ["warehouse removal helper", "removeWarehouse"],
-  ["warehouse card drag lock", 'draggable="${state.organizingWarehouseId ? "false" : "true"}"'],
+  ["warehouse cards avoid eager native dragging", 'data-warehouse-card="${warehouse.id}"'],
   ["warehouse drag binder", "bindWarehouseDragEvents"],
   ["normalized warehouse state helper", "normalizeWarehouseState"],
   ["warehouse record hydration helper", "hydrateWarehouseRecord"],
   ["warehouse record persistence helper", "persistWarehouseRecord"],
   ["warehouse record reorder helper", "reorderWarehouseRecords"],
-  ["warehouse pointer initiation state", "warehouseDragStartedFromButton"],
+  ["warehouse click suppression state", "suppressWarehouseClick"],
   ["warehouse touch drag state", "touchWarehouseDrag"],
   ["warehouse delete confirmation", "仓内松果和整理文档会一并删除"],
   ["warehouse dialog state", "warehouseDialog"],
@@ -325,13 +325,14 @@ const warehouseDragSource = appSource.slice(
 );
 const warehouseDragFailures = [];
 [
-  ["Pointer down records button initiation", 'card.addEventListener("pointerdown"'],
-  ["Native drag checks recorded initiation", "if (warehouseDragStartedFromButton)"],
-  ["Touch dragging has a pointer move path", 'card.addEventListener("pointermove"'],
-  ["Touch dragging commits on pointer up", 'card.addEventListener("pointerup"'],
-  ["Touch dragging cancels on pointer cancel", 'card.addEventListener("pointercancel"'],
-  ["Touch dragging hit-tests the card under the pointer", "document.elementFromPoint"],
-  ["Touch dragging is limited to touch pointers", 'event.pointerType !== "touch"'],
+  ["Whole warehouse card handles selection", 'card.addEventListener("click"'],
+  ["Pointer dragging starts from the whole card", 'card.addEventListener("pointerdown"'],
+  ["Pointer dragging has a move path", 'card.addEventListener("pointermove"'],
+  ["Pointer dragging commits on pointer up", 'card.addEventListener("pointerup"'],
+  ["Pointer dragging cancels on pointer cancel", 'card.addEventListener("pointercancel"'],
+  ["Pointer dragging hit-tests the card under the pointer", "document.elementFromPoint"],
+  ["Mouse dragging uses an explicit movement threshold", "MOUSE_DRAG_MOVE_THRESHOLD"],
+  ["Completed dragging suppresses the following click", "suppressWarehouseClick"],
   ["Touch dragging waits for long-press activation", "activateTouchWarehouseDrag"],
   ["Touch dragging cancels an armed moving pointer", "TOUCH_DRAG_MOVE_THRESHOLD"],
   ["Touch dragging rejects a second pointer", "if (touchWarehouseDrag)"],
@@ -350,15 +351,15 @@ const warehouseDragFailures = [];
     warehouseDragFailures.push(failure);
   }
 });
-if (warehouseDragSource.includes('if (event.target.closest("button"))')) {
-  warehouseDragFailures.push("Native drag still checks the retargeted dragstart target");
+if (warehouseDragSource.includes('card.addEventListener("dragstart"')) {
+  warehouseDragFailures.push("Warehouse cards still rely on eager native dragging");
 }
 if (!appSource.includes('document.addEventListener("touchmove", preventActiveWarehouseTouchScroll, { passive: false });')) {
   warehouseDragFailures.push("Active touch drag does not install a non-passive scroll prevention hook");
 }
 const pointerDownSource = warehouseDragSource.slice(
   warehouseDragSource.indexOf('card.addEventListener("pointerdown"'),
-  warehouseDragSource.indexOf('card.addEventListener("dragstart"'),
+  warehouseDragSource.indexOf('card.addEventListener("pointermove"'),
 );
 if (!pointerDownSource.includes("event.preventDefault();") || !pointerDownSource.includes("event.stopPropagation();") || !pointerDownSource.includes("{ capture: true }")) {
   warehouseDragFailures.push("Second touch is not suppressed before nested button activation");
@@ -371,7 +372,7 @@ if (!touchActivationSource.includes("if (!card.isConnected)") || !touchActivatio
   warehouseDragFailures.push("Disconnected touch activation does not fully clear gesture state");
 }
 const warehouseCardCss = cssSource.slice(
-  cssSource.indexOf('.warehouse-card[draggable="true"]'),
+  cssSource.indexOf(".warehouse-card {"),
   cssSource.indexOf(".warehouse-icon-button,"),
 );
 if (!warehouseCardCss.includes("touch-action: auto") && !warehouseCardCss.includes("touch-action: pan-x pan-y")) {
@@ -400,7 +401,7 @@ if (!warehouseListCss.includes("align-content: start")) {
 }
 const warehouseCardBaseCss = cssSource.slice(
   cssSource.indexOf(".warehouse-card {"),
-  cssSource.indexOf('.warehouse-card[draggable="true"]'),
+  cssSource.indexOf(".warehouse-card.drop-before::before"),
 );
 if (!warehouseCardBaseCss.includes("height: 132px")) {
   warehouseDragFailures.push("Warehouse cards do not declare the shared fixed height");
