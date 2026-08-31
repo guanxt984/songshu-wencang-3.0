@@ -325,8 +325,8 @@ img {
 .warehouse-icon {
   position: relative;
   display: block;
-  width: 62px;
-  height: 62px;
+  width: 55.8px;
+  height: 55.8px;
 }
 
 .warehouse-color-moss { filter: hue-rotate(42deg) saturate(0.88); }
@@ -381,9 +381,9 @@ img {
 }
 
 .book-icon {
-  width: 56px;
-  height: 58px;
-  flex: 0 0 56px;
+  width: 50.4px;
+  height: 52.2px;
+  flex: 0 0 50.4px;
   transform: rotate(-15deg);
 }
 

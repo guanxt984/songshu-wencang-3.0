@@ -83,6 +83,9 @@ const expectations = [
 
 const cssExpectations = [
   ["natural wood warehouse color", ".warehouse-color-wood"],
+  ["warehouse avatar reduced to ninety percent", "width: 55.8px"],
+  ["document avatar width reduced to ninety percent", "width: 50.4px"],
+  ["document avatar height reduced to ninety percent", "height: 52.2px"],
   ["two line warehouse names", "-webkit-line-clamp: 2"],
   ["warehouse avatar options", ".warehouse-avatar-options"],
   ["moss warehouse color", ".warehouse-color-moss"],
