@@ -197,9 +197,9 @@ export function useOnlyExampleWarehouses(state, examples, collectionVersion) {
   };
 }
 
-export function createEmptyWarehouseRecord(id, name, updatedAt) {
+export function createEmptyWarehouseRecord(id, name, updatedAt, avatar = "pinecone-warehouse-icon.png") {
   return {
-    warehouse: { id, name, updatedAt },
+    warehouse: { id, name, updatedAt, avatar },
     document: {
       title: name,
       sections: [{

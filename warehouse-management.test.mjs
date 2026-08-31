@@ -187,9 +187,10 @@ test("removeWarehouseRecord deletes warehouse scoped document shelves and pineco
 });
 
 test("createEmptyWarehouseRecord initializes independent empty document shelf and pinecone stores", () => {
-  const record = createEmptyWarehouseRecord("w1", "新仓", "今天 12:00 更新");
+  const record = createEmptyWarehouseRecord("w1", "新仓", "今天 12:00 更新", "achang-wave.png");
 
   assert.equal(record.warehouse.id, "w1");
+  assert.equal(record.warehouse.avatar, "achang-wave.png");
   assert.equal(record.document.title, "新仓");
   assert.deepEqual(record.shelves.map((shelf) => shelf.id), ["ideas"]);
   assert.deepEqual(record.pinecones, []);
@@ -215,7 +216,8 @@ test("reorderWarehouseRecords only changes order metadata", () => {
 });
 
 test("example warehouses preserve messy source fragments and produce structured documents", () => {
-  assert.deepEqual(exampleWarehouses.map((warehouse) => warehouse.name), ["《如何成为产品经理》", "《人性的弱点摘抄》"]);
+  assert.deepEqual(exampleWarehouses.map((warehouse) => warehouse.name), ["如何成为产品经理", "人性的弱点摘抄"]);
+  assert.deepEqual(exampleWarehouses.map((warehouse) => warehouse.avatar), ["warehouse-icon-product-manager.png", "warehouse-icon-human-nature.png"]);
   assert.equal(exampleWarehouses.some((warehouse) => "iconDataUrl" in warehouse), false);
 
   for (const warehouse of exampleWarehouses) {
