@@ -331,6 +331,7 @@ img {
 .warehouse-color-clay { filter: hue-rotate(-8deg) saturate(1.08); }
 .warehouse-color-sky { filter: hue-rotate(154deg) saturate(0.72); }
 .warehouse-color-plum { filter: hue-rotate(232deg) saturate(0.66); }
+.warehouse-color-wood { filter: none; }
 
 .custom-warehouse-icon {
   border: 2px solid rgba(143, 80, 23, 0.58);

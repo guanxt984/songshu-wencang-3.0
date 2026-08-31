@@ -387,7 +387,8 @@ function renderWarehouseCard(warehouse) {
 }
 
 function renderWarehouseIcon(warehouse) {
-  return asset("pinecone-warehouse-icon.png", `warehouse-icon warehouse-color-${getWarehouseColor(warehouse.name)}`);
+  const color = warehouse.id.startsWith("example_") ? "wood" : getWarehouseColor(warehouse.name);
+  return asset("pinecone-warehouse-icon.png", `warehouse-icon warehouse-color-${color}`);
 }
 
 function renderShelfIcon(className) {

@@ -36,6 +36,7 @@ const expectations = [
   ["modal makes background inert", '${state.warehouseDialog ? "inert" : ""}'],
   ["approved warehouse icon", "pinecone-warehouse-icon.png"],
   ["warehouse name color", "getWarehouseColor"],
+  ["official templates use natural wood color", 'warehouse.id.startsWith("example_") ? "wood"'],
   ["approved shelf icon", "pinecone-shelf-icon.png"],
   ["approved pinecone icon", "pinecone-icon.png"],
   ["document warehouse icon follows active warehouse", "renderWarehouseIcon(warehouse).replace(\"warehouse-icon\", \"book-icon\")"],
@@ -74,6 +75,7 @@ const expectations = [
 ];
 
 const cssExpectations = [
+  ["natural wood warehouse color", ".warehouse-color-wood"],
   ["moss warehouse color", ".warehouse-color-moss"],
   ["clay warehouse color", ".warehouse-color-clay"],
   ["sky warehouse color", ".warehouse-color-sky"],
