@@ -403,7 +403,7 @@ function renderToolbar() {
     <nav class="document-corner-tools" aria-label="文档工具" data-toolbar>
       <button class="corner-tool" type="button" data-action="toggle-add" aria-label="添加松果" title="添加松果" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.plus("toolbar-img add")}</span><span class="corner-tool-label">添加松果</span></button>
       <button class="corner-tool" type="button" data-action="toggle-document-edit" aria-label="${state.editMode ? "保存文档" : "编辑文档"}" title="${state.editMode ? "保存文档" : "编辑文档"}" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.book("toolbar-img")}</span><span class="corner-tool-label">${state.editMode ? "保存文档" : "编辑文档"}</span></button>
-      <button class="corner-tool" type="button" data-action="reorganize" aria-label="重新整理" title="${canOrganize ? "重新整理" : "添加松果后可整理"}" ${canOrganize ? "" : "disabled"}><span class="toolbar-icon-box">${icons.leaf("toolbar-img")}</span><span class="corner-tool-label">${readOnly ? "整理中" : "重新整理"}</span></button>
+      <button class="corner-tool${canOrganize ? "" : " is-disabled"}" type="button" data-action="reorganize" aria-label="重新整理" aria-disabled="${canOrganize ? "false" : "true"}" title="${canOrganize ? "重新整理" : "添加松果后可整理"}"><span class="toolbar-icon-box">${icons.leaf("toolbar-img")}</span><span class="corner-tool-label">${readOnly ? "整理中" : "重新整理"}</span></button>
     </nav>
   `;
 }

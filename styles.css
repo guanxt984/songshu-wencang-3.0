@@ -448,6 +448,18 @@ img {
   outline-offset: 2px;
 }
 
+.corner-tool.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.corner-tool.is-disabled:hover {
+  color: inherit;
+  border-color: rgba(190, 138, 67, 0.42);
+  background: rgba(255, 252, 235, 0.82);
+  box-shadow: 0 2px 0 rgba(173, 112, 45, 0.12);
+}
+
 .document-mascot {
   position: absolute;
   top: -81px;

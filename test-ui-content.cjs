@@ -250,6 +250,16 @@ const toolbarFailures = [];
 if ((toolbarSource.match(/<button\b/g) || []).length !== 3) {
   toolbarFailures.push("Toolbar does not render exactly three action buttons");
 }
+const reorganizeButtonSource = toolbarSource.slice(
+  toolbarSource.indexOf('data-action="reorganize"') - 80,
+  toolbarSource.indexOf('data-action="reorganize"') + 420,
+);
+if (!reorganizeButtonSource.includes('aria-disabled="${canOrganize ? "false" : "true"}"')) {
+  toolbarFailures.push("Unavailable reorganization does not expose aria-disabled state");
+}
+if (reorganizeButtonSource.includes('? "" : "disabled"')) {
+  toolbarFailures.push("Unavailable reorganization still swallows explanatory clicks with native disabled");
+}
 ["organize-existing", "toggle-shelf"].forEach((action) => {
   if (toolbarSource.includes(`data-action="${action}"`)) {
     toolbarFailures.push(`Forbidden toolbar action: ${action}`);
