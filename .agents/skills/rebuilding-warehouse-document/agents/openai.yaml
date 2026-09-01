@@ -1,0 +1,8 @@
+interface:
+  display_name: "全部重新整理"
+  short_description: "使用全部原始松果重新识别主题并构建完整可追溯的知识文档"
+  default_prompt: "使用 $rebuilding-warehouse-document 根据仓库中的全部松果重新建立文档。"
+
+policy:
+  allow_implicit_invocation: true
+

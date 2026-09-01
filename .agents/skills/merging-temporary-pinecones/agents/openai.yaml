@@ -1,0 +1,8 @@
+interface:
+  display_name: "保持当前分区整理"
+  short_description: "安全合并暂存松果，完整保留现有分区、人工修改和旧引用"
+  default_prompt: "使用 $merging-temporary-pinecones 将暂存栏松果安全并入当前文档。"
+
+policy:
+  allow_implicit_invocation: true
+
