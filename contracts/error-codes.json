@@ -1,5 +1,13 @@
 {
   "AUTH_REQUIRED": { "httpStatus": 401, "message": "登录状态已失效，请重新登录" },
+  "EMAIL_INVALID": { "httpStatus": 422, "message": "请输入有效的邮箱地址" },
+  "EMAIL_CODE_COOLDOWN": { "httpStatus": 429, "message": "验证码发送过于频繁，请稍后再试" },
+  "EMAIL_CODE_DAILY_LIMIT": { "httpStatus": 429, "message": "该邮箱今日验证码发送次数已达上限" },
+  "IP_CODE_DAILY_LIMIT": { "httpStatus": 429, "message": "当前网络今日验证码发送次数已达上限" },
+  "EMAIL_CODE_INVALID": { "httpStatus": 422, "message": "验证码不正确或已失效" },
+  "EMAIL_CODE_EXPIRED": { "httpStatus": 422, "message": "验证码已过期，请重新获取" },
+  "EMAIL_DELIVERY_UNAVAILABLE": { "httpStatus": 503, "message": "验证码暂时无法发送，请稍后重试" },
+  "ORIGIN_INVALID": { "httpStatus": 403, "message": "请求来源不受信任" },
   "FORBIDDEN": { "httpStatus": 403, "message": "无权访问此资源" },
   "CSRF_INVALID": { "httpStatus": 403, "message": "请求验证失败，请刷新后重试" },
   "VALIDATION_FAILED": { "httpStatus": 422, "message": "提交内容格式不正确" },
@@ -15,5 +23,7 @@
   "AI_OUTPUT_PINECONE_ASSIGNMENT_INVALID": { "httpStatus": 502, "message": "整理结果未能完整归类材料，请重试" },
   "AI_QUOTA_EXCEEDED": { "httpStatus": 429, "message": "今日整理次数已用完" },
   "AI_JOB_ACTIVE": { "httpStatus": 409, "message": "当前账号已有整理任务进行中" },
-  "REQUEST_TOO_LARGE": { "httpStatus": 413, "message": "请求内容过大" }
+  "REQUEST_TOO_LARGE": { "httpStatus": 413, "message": "请求内容过大" },
+  "INTERNAL_ERROR": { "httpStatus": 500, "message": "服务暂时不可用" },
+  "SERVICE_NOT_CONFIGURED": { "httpStatus": 503, "message": "服务尚未配置" }
 }
