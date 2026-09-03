@@ -8,6 +8,11 @@ const indexSource = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const expectations = [
   ["product title", "松鼠文仓"],
   ["product subtitle", "把零散信息整理成结构化文档"],
+  ["email login heading", "邮箱登录"],
+  ["email login input", "data-auth-input=\"email\""],
+  ["verification code input", "data-auth-input=\"code\""],
+  ["local verification hint", "本地测试验证码：123456"],
+  ["logout action", "data-auth-action=\"logout\""],
   ["warehouse list", "松果仓列表"],
   ["add pinecone action", "添加松果"],
   ["temporary shelf option", "暂存栏"],
@@ -21,6 +26,7 @@ const expectations = [
   ["toolbar reorganize action", "reorganize"],
   ["shelf search state", "shelfQuery"],
   ["local persistence key", "squirrel-warehouse-mvp"],
+  ["unauthenticated toast is null safe", "state?.toast"],
   ["mock organizer entry", "organizeWarehouse"],
   ["mock organizer", "organizeWarehouseWithMock"],
   ["add pinecone handler", "addPinecone"],
@@ -82,6 +88,9 @@ const expectations = [
 ];
 
 const cssExpectations = [
+  ["authentication shell", ".auth-shell"],
+  ["authentication error state", ".auth-error"],
+  ["authentication focus state", ".auth-field:focus"],
   ["natural wood warehouse color", ".warehouse-color-wood"],
   ["warehouse avatar reduced to ninety percent", "width: 55.8px"],
   ["document avatar width reduced to ninety percent", "width: 50.4px"],

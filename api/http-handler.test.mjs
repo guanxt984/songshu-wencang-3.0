@@ -46,7 +46,9 @@ test("session endpoint authenticates from the session cookie", async () => {
   const cookie = verified.headers.get("set-cookie").split(";")[0];
   const response = await handle(request("/api/auth/session", { headers: { cookie } }));
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).user.email, "a@example.com");
+  const payload = await response.json();
+  assert.equal(payload.user.email, "a@example.com");
+  assert.match(payload.csrfToken, /^[a-f0-9]{32}$/);
 });
 
 test("logout requires matching Origin and double-submit CSRF token", async () => {

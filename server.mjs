@@ -1,12 +1,18 @@
 import { createReadStream, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize } from "node:path";
+import { createLocalDevelopmentApi } from "./api/local-development.js";
+import { writeWebResponse } from "./api/node-response.js";
 
 const port = Number(process.env.PORT || 5173);
 const root = process.cwd();
 // The local static server deliberately does not emulate production auth.
 // A production FC entrypoint must inject PostgreSQL and email adapters.
-const apiHandler = null;
+const isLocalDevelopment = process.env.LOCAL_DEVELOPMENT_AUTH === "true";
+const localApi = isLocalDevelopment ? createLocalDevelopmentApi({
+  allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`],
+}) : null;
+const apiHandler = localApi?.handle || null;
 const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -68,10 +74,4 @@ async function toWebRequest(request) {
     body,
     ...(body ? { duplex: "half" } : {}),
   });
-}
-
-async function writeWebResponse(response, webResponse) {
-  response.statusCode = webResponse.status;
-  webResponse.headers.forEach((value, name) => response.setHeader(name, value));
-  response.end(Buffer.from(await webResponse.arrayBuffer()));
 }

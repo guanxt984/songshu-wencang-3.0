@@ -32,6 +32,7 @@ test("local server delegates API paths without exposing authentication secrets",
   const server = await readFile(serverPath, "utf8");
   assert.match(server, /url\.pathname\.startsWith\("\/api\/"\)/);
   assert.match(server, /SERVICE_NOT_CONFIGURED/);
+  assert.match(server, /LOCAL_DEVELOPMENT_AUTH === "true"/);
   assert.match(server, /requestTimeout = 15_000/);
   assert.doesNotMatch(server, /createMemoryAuthRepository/);
   assert.doesNotMatch(server, /console\.log\([^\n]*(code|token|cookie)/i);

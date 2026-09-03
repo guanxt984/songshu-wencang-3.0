@@ -1,6 +1,7 @@
 import { applyDocumentEdit, applyPineconeEdits, BUILT_IN_WAREHOUSE_AVATARS, canStartWarehouseOrganization, createEmptyWarehouseRecord, deriveShelfSections, getWarehouseColor, getWarehouseRecords, hasExceededWarehouseDragThreshold, hydrateWarehouseRecord, isWarehouseAvatarSource, isWarehouseReadOnly, normalizeWarehouseState, persistWarehouseRecord, removeWarehouseRecord, reorderWarehouseRecords, useOnlyExampleWarehouses, validateWarehouseAvatarFile } from "./warehouse-management.js";
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 import { organizeWarehouseLocally } from "./organizer.js";
+import { createAuthFlow } from "./auth-flow.js";
 
 const STORAGE_KEY = "squirrel-warehouse-mvp";
 const USE_API_ORGANIZER = false;
@@ -162,7 +163,9 @@ const initialState = {
   ],
 };
 
-let state = loadState();
+let state = null;
+const authFlow = createAuthFlow();
+let authState = authFlow.getState();
 const app = document.querySelector("#app");
 const toast = document.querySelector("#toast");
 let draggedWarehouseId = "";
@@ -171,7 +174,18 @@ let warehouseAutoScrollFrame = 0;
 let suppressWarehouseClick = false;
 
 document.addEventListener("touchmove", preventActiveWarehouseTouchScroll, { passive: false });
-render();
+bootstrapAuth();
+
+async function bootstrapAuth() {
+  render();
+  try {
+    authState = await authFlow.restore();
+  } catch {
+    authState = authFlow.getState();
+  }
+  if (authState.status === "authenticated") state = loadState(authState.user.id);
+  render();
+}
 
 function makeWarehouse(id, name, updatedAt, contents) {
   const pinecones = contents.map((content, index) => ({
@@ -204,20 +218,25 @@ function makeWarehouse(id, name, updatedAt, contents) {
   };
 }
 
-function loadState() {
+function accountStorageKey(userId) {
+  return `${STORAGE_KEY}:user:${userId}`;
+}
+
+function loadState(userId) {
+  const storageKey = accountStorageKey(userId);
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
     const normalized = normalizeWarehouseState(saved || initialState, initialState.version);
     const migrated = useOnlyExampleWarehouses(normalized, exampleWarehouses, EXAMPLE_COLLECTION_VERSION);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+    localStorage.setItem(storageKey, JSON.stringify(migrated));
     return resetTransientState(migrated);
   } catch {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(storageKey);
   }
 
   const normalized = normalizeWarehouseState(initialState, initialState.version);
   const migrated = useOnlyExampleWarehouses(normalized, exampleWarehouses, EXAMPLE_COLLECTION_VERSION);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+  localStorage.setItem(storageKey, JSON.stringify(migrated));
   return resetTransientState(migrated);
 }
 
@@ -248,7 +267,7 @@ function saveState() {
     pineconeDrafts: _pineconeDrafts,
     ...persisted
   } = state;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  localStorage.setItem(accountStorageKey(authState.user.id), JSON.stringify(persisted));
 }
 
 function getActiveWarehouse() {
@@ -270,7 +289,108 @@ function isActiveWarehouseOrganizing() {
   return isWarehouseReadOnly(state.organizingWarehouseId, state.activeWarehouseId);
 }
 
+function renderAuthGate() {
+  const isCodeStep = ["code", "verifying"].includes(authState.status);
+  const isBusy = ["loading", "sending", "verifying"].includes(authState.status);
+  return `
+    <section class="auth-shell">
+      <div class="auth-brand" aria-label="松鼠文仓">
+        ${icons.logo("auth-logo")}
+        <div><h1>松鼠文仓</h1><p>把零散信息整理成结构化文档</p></div>
+      </div>
+      <main class="auth-card" aria-busy="${isBusy}">
+        <span class="auth-eyebrow">公开测试版</span>
+        <h2>${authState.status === "loading" ? "正在确认登录状态" : isCodeStep ? "查收验证码" : "邮箱登录"}</h2>
+        <p class="auth-intro">${isCodeStep ? `验证码已发送至 <strong>${escapeHtml(authState.email)}</strong>` : "使用邮箱继续，你的松鼠仓将在登录后与账号关联。"}</p>
+        ${authState.status === "loading" ? '<div class="auth-skeleton" aria-label="加载中"></div>' : isCodeStep ? `
+          <form class="auth-form" data-auth-form="code">
+            <label for="auth-code">6 位验证码</label>
+            <input class="auth-field auth-code-field" id="auth-code" data-input="auth-code" data-auth-input="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required autofocus>
+            ${isLocalDevelopmentHost() ? '<p class="auth-dev-note">本地测试验证码：123456</p>' : ""}
+            ${authState.error ? `<p class="auth-error" role="alert">${escapeHtml(authState.error)}</p>` : ""}
+            <button class="auth-primary" type="submit" ${isBusy ? "disabled" : ""}>${authState.status === "verifying" ? "正在登录…" : "登录并进入松鼠文仓"}</button>
+            <button class="auth-link" type="button" data-auth-action="resend-code" ${authState.retryAfterSeconds > 0 ? "disabled" : ""}>${authState.retryAfterSeconds > 0 ? `重新发送（${authState.retryAfterSeconds}s）` : "重新发送验证码"}</button>
+            <button class="auth-link" type="button" data-auth-action="change-email">更换邮箱</button>
+          </form>
+        ` : `
+          <form class="auth-form" data-auth-form="email">
+            <label for="auth-email">邮箱地址</label>
+            <input class="auth-field" id="auth-email" data-input="auth-email" data-auth-input="email" type="email" autocomplete="email" placeholder="name@example.com" value="${escapeHtml(authState.email)}" required autofocus>
+            ${authState.error ? `<p class="auth-error" role="alert">${escapeHtml(authState.error)}</p>` : ""}
+            <button class="auth-primary" type="submit" ${isBusy ? "disabled" : ""}>${authState.status === "sending" ? "正在发送…" : "获取邮箱验证码"}</button>
+          </form>
+        `}
+        <p class="auth-footnote">登录即表示你同意仅将账号数据用于松鼠文仓公开测试。</p>
+      </main>
+    </section>
+  `;
+}
+
+function bindAuthEvents() {
+  scheduleResendCountdown();
+  document.querySelector("[data-auth-form='email']")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const email = document.querySelector("[data-input='auth-email']")?.value || "";
+    const pending = authFlow.requestCode(email);
+    authState = authFlow.getState();
+    render();
+    try { await pending; } catch {}
+    authState = authFlow.getState();
+    render();
+  });
+  document.querySelector("[data-auth-form='code']")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const code = document.querySelector("[data-input='auth-code']")?.value || "";
+    const pending = authFlow.verifyCode(code);
+    authState = authFlow.getState();
+    render();
+    try { await pending; } catch {}
+    authState = authFlow.getState();
+    render();
+  });
+  document.querySelector("[data-auth-action='change-email']")?.addEventListener("click", () => {
+    authState = { ...authState, status: "email", error: "" };
+    render();
+  });
+  document.querySelector("[data-auth-action='resend-code']")?.addEventListener("click", async () => {
+    const pending = authFlow.resendCode();
+    authState = authFlow.getState();
+    render();
+    try { await pending; } catch {}
+    authState = authFlow.getState();
+    render();
+  });
+}
+
+function scheduleResendCountdown() {
+  if (authState.status !== "code" || authState.retryAfterSeconds <= 0) return;
+  window.setTimeout(() => {
+    if (authFlow.getState().status !== "code") return;
+    authState = authFlow.getState();
+    const button = document.querySelector("[data-auth-action='resend-code']");
+    if (!button) return;
+    button.disabled = authState.retryAfterSeconds > 0;
+    button.textContent = authState.retryAfterSeconds > 0 ? `重新发送（${authState.retryAfterSeconds}s）` : "重新发送验证码";
+    scheduleResendCountdown();
+  }, 1000);
+}
+
+function renderAccountControl() {
+  return `<div class="account-control"><span>${escapeHtml(authState.user?.email || "")}</span><button type="button" data-auth-action="logout">退出登录</button></div>`;
+}
+
+function isLocalDevelopmentHost() {
+  return ["127.0.0.1", "localhost"].includes(window.location.hostname);
+}
+
 function render() {
+  if (authState.status !== "authenticated") {
+    app.innerHTML = renderAuthGate();
+    bindAuthEvents();
+    renderToast();
+    return;
+  }
+  if (!state) state = loadState(authState.user.id);
   const warehouse = getActiveWarehouse();
   if (!warehouse) {
     app.innerHTML = renderEmptyWarehouseState();
@@ -291,6 +411,7 @@ function render() {
             <p>把零散信息整理成结构化文档 ${icons.leaf("brand-leaf")}</p>
           </div>
         </div>
+        ${renderAccountControl()}
       </header>
 
       <aside class="warehouse-panel">
@@ -360,6 +481,7 @@ function renderEmptyWarehouseState() {
           <p>把零散信息整理成结构化文档 ${icons.leaf("brand-leaf")}</p>
           </div>
         </div>
+        ${renderAccountControl()}
       </header>
       <main class="warehouse-empty-state">
         ${icons.logo("empty-warehouse-squirrel")}
@@ -624,6 +746,16 @@ function renderShelfPinecone(pinecone) {
 }
 
 function bindEvents() {
+  document.querySelector("[data-auth-action='logout']")?.addEventListener("click", async () => {
+    try {
+      authState = await authFlow.logout();
+      state = null;
+      render();
+    } catch (error) {
+      state.toast = error.message;
+      renderToast();
+    }
+  });
   document.querySelectorAll("[data-action]").forEach((element) => {
     element.addEventListener("click", (event) => {
       const action = element.dataset.action;
@@ -1261,8 +1393,8 @@ function showToast(message) {
 }
 
 function renderToast() {
-  toast.textContent = state.toast;
-  toast.classList.toggle("show", Boolean(state.toast));
+  toast.textContent = state?.toast || "";
+  toast.classList.toggle("show", Boolean(state?.toast));
 }
 
 function escapeHtml(value) {

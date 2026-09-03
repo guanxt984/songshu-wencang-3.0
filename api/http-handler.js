@@ -54,8 +54,10 @@ export function createApiHandler({ authService, warehouseService, allowedOrigins
         const sessionToken = cookies[sessionCookieName];
         const session = await authService.getSession(sessionToken);
         if (!session) return errorResponse("AUTH_REQUIRED");
-        const response = json({ user: { id: session.userId, email: session.email } });
+        const csrfToken = randomBytes(16).toString("hex");
+        const response = json({ user: { id: session.userId, email: session.email }, csrfToken });
         response.headers.append("set-cookie", cookie(sessionCookieName, sessionToken, { httpOnly: true, secure: secureCookies, maxAge: 7 * 24 * 60 * 60 }));
+        response.headers.append("set-cookie", cookie("nestnote_csrf", csrfToken, { httpOnly: false, secure: secureCookies, maxAge: 7 * 24 * 60 * 60 }));
         return response;
       }
 
