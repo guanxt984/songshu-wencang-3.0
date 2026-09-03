@@ -14,6 +14,8 @@
   "REVISION_CONFLICT": { "httpStatus": 409, "message": "内容已在其他设备更新" },
   "WAREHOUSE_ORGANIZING": { "httpStatus": 409, "message": "仓库正在重新整理，请稍后刷新" },
   "WAREHOUSE_LIMIT_REACHED": { "httpStatus": 409, "message": "每个账号最多创建 10 个仓库" },
+  "WAREHOUSE_NOT_FOUND": { "httpStatus": 404, "message": "松鼠仓不存在" },
+  "WAREHOUSE_NOT_EMPTY": { "httpStatus": 409, "message": "仅可在云端松鼠仓为空时导入" },
   "AI_INPUT_EMPTY": { "httpStatus": 422, "message": "请先添加至少一条松果" },
   "AI_INPUT_ITEM_TOO_LARGE": { "httpStatus": 422, "message": "单条松果内容过长" },
   "AI_INPUT_TOO_LARGE": { "httpStatus": 422, "message": "本次整理材料总量过大" },

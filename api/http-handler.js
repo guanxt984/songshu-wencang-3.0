@@ -14,9 +14,15 @@ const ERROR_STATUS = {
   CSRF_INVALID: 403,
   REQUEST_TOO_LARGE: 413,
   VALIDATION_FAILED: 422,
+  WAREHOUSE_NOT_FOUND: 404,
+  WAREHOUSE_NOT_EMPTY: 409,
+  WAREHOUSE_LIMIT_REACHED: 409,
+  WAREHOUSE_ORGANIZING: 409,
+  REVISION_CONFLICT: 409,
 };
+const PUBLIC_ERROR_CODES = new Set(Object.keys(ERROR_STATUS));
 
-export function createApiHandler({ authService, allowedOrigins = [], secureCookies = true, sessionCookieName = "nestnote_session", resolveClientIp = () => "unknown" }) {
+export function createApiHandler({ authService, warehouseService, allowedOrigins = [], secureCookies = true, sessionCookieName = "nestnote_session", resolveClientIp = () => "unknown" }) {
   const trustedOrigins = new Set(allowedOrigins);
 
   return async function handle(request) {
@@ -64,9 +70,37 @@ export function createApiHandler({ authService, allowedOrigins = [], secureCooki
         return new Response(null, { status: 204, headers });
       }
 
+      if (url.pathname === "/api/warehouses" || url.pathname === "/api/warehouses/order" || url.pathname === "/api/import" || /^\/api\/warehouses\/[^/]+$/.test(url.pathname)) {
+        const cookies = parseCookies(request.headers.get("cookie"));
+        const session = await authService.getSession(cookies[sessionCookieName]);
+        if (!session) return errorResponse("AUTH_REQUIRED");
+        if (request.method !== "GET" && !hasValidCsrf(request, cookies)) return errorResponse("CSRF_INVALID");
+
+        if (route === "GET /api/warehouses") return json(await warehouseService.listWarehouses(session.userId));
+        if (route === "POST /api/warehouses") {
+          const body = await readJson(request);
+          return json(await warehouseService.createWarehouse(session.userId, body.snapshot), 201);
+        }
+        if (route === "PUT /api/warehouses/order") return json(await warehouseService.reorderWarehouses(session.userId, await readJson(request)));
+        if (route === "POST /api/import") return json(await warehouseService.importWarehouses(session.userId, await readJson(request)));
+
+        let id;
+        try {
+          id = decodeURIComponent(url.pathname.slice("/api/warehouses/".length));
+        } catch {
+          return errorResponse("VALIDATION_FAILED");
+        }
+        if (request.method === "GET") return json(await warehouseService.getWarehouse(session.userId, id));
+        if (request.method === "PUT") return json(await warehouseService.saveWarehouse(session.userId, id, await readJson(request)));
+        if (request.method === "DELETE") {
+          await warehouseService.deleteWarehouse(session.userId, id, await readJson(request));
+          return new Response(null, { status: 204 });
+        }
+      }
+
       return errorResponse("NOT_FOUND", 404, "接口不存在");
     } catch (error) {
-      return error.code ? errorResponse(error.code) : errorResponse("INTERNAL_ERROR", 500, "服务暂时不可用");
+      return PUBLIC_ERROR_CODES.has(error.code) ? errorResponse(error.code) : errorResponse("INTERNAL_ERROR", 500, "服务暂时不可用");
     }
   };
 }
@@ -90,6 +124,11 @@ function parseCookies(header = "") {
     const index = part.indexOf("=");
     return index < 0 ? [part, ""] : [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
   }));
+}
+
+function hasValidCsrf(request, cookies) {
+  const token = request.headers.get("x-csrf-token");
+  return Boolean(token && cookies.nestnote_csrf && token === cookies.nestnote_csrf);
 }
 
 function cookie(name, value, { httpOnly, secure, maxAge } = {}) {
@@ -122,6 +161,11 @@ function safeMessage(code) {
     CSRF_INVALID: "请求验证失败，请刷新后重试",
     REQUEST_TOO_LARGE: "请求内容过大",
     VALIDATION_FAILED: "提交内容格式不正确",
+    WAREHOUSE_NOT_FOUND: "松鼠仓不存在",
+    WAREHOUSE_NOT_EMPTY: "仅可在云端松鼠仓为空时导入",
+    WAREHOUSE_LIMIT_REACHED: "每个账号最多创建 10 个松鼠仓",
+    WAREHOUSE_ORGANIZING: "松鼠仓正在重新整理，请稍后刷新",
+    REVISION_CONFLICT: "内容已在其他设备更新",
   })[code] || "服务暂时不可用";
 }
 

@@ -138,6 +138,18 @@ test("REST contract exposes public beta routes and stable conflict response", as
   assert.equal(openapi.paths["/api/warehouses/{id}"].put.responses["409"].$ref, "#/components/responses/RevisionConflict");
   assert.equal(errors.REVISION_CONFLICT.httpStatus, 409);
   assert.equal(errors.REVISION_CONFLICT.message, "内容已在其他设备更新");
+  assert.deepEqual(openapi.components.schemas.WarehouseWrite.required, ["revision", "snapshot"]);
+  assert.deepEqual(openapi.components.schemas.ImportRequest.required, ["idempotencyKey", "warehouses"]);
+});
+
+test("warehouse snapshot validation rejects excessive nesting and content", () => {
+  const deeplyNested = { schema_version: 1, name: "深层", document: {}, shelves: [], pinecones: [] };
+  let cursor = deeplyNested.document;
+  for (let index = 0; index < 40; index += 1) cursor.next = cursor = {};
+  assert.equal(validateWarehouseSnapshot(deeplyNested).code, "VALIDATION_FAILED");
+
+  const tooLong = { schema_version: 1, name: "过长", document: {}, shelves: [], pinecones: [{ id: "p", content: "字".repeat(4001) }] };
+  assert.equal(validateWarehouseSnapshot(tooLong).code, "VALIDATION_FAILED");
 });
 
 test("first database migration declares ownership and active job constraints", async () => {

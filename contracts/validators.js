@@ -2,6 +2,9 @@ const MAX_PINECONES = 500;
 const MAX_PINECONE_CODE_POINTS = 4_000;
 const MAX_TOTAL_CODE_POINTS = 20_000;
 const MAX_REQUEST_BYTES = 1_048_576;
+const MAX_SNAPSHOT_DEPTH = 32;
+const MAX_SNAPSHOT_NODES = 10_000;
+const MAX_SHELVES = 500;
 
 const jobTransitions = new Set([
   "queued:running",
@@ -23,7 +26,45 @@ export function validateWarehouseSnapshot(snapshot) {
   if (Object.keys(snapshot).some((key) => !allowed.has(key))) return invalid("VALIDATION_FAILED");
   if (snapshot.schema_version !== 1 || typeof snapshot.name !== "string" || !snapshot.name.trim()) return invalid("VALIDATION_FAILED");
   if (!isObject(snapshot.document) || !Array.isArray(snapshot.shelves) || !Array.isArray(snapshot.pinecones)) return invalid("VALIDATION_FAILED");
+  if (snapshot.name.length > 120 || snapshot.shelves.length > MAX_SHELVES || snapshot.pinecones.length > MAX_PINECONES || !hasBoundedShape(snapshot)) return invalid("VALIDATION_FAILED");
+  const shelfIds = new Set();
+  for (const shelf of snapshot.shelves) {
+    if (!isObject(shelf) || typeof shelf.id !== "string" || !shelf.id || shelfIds.has(shelf.id)) return invalid("VALIDATION_FAILED");
+    shelfIds.add(shelf.id);
+  }
+  const pineconeIds = new Set();
+  for (const pinecone of snapshot.pinecones) {
+    if (!isObject(pinecone) || typeof pinecone.id !== "string" || !pinecone.id || pinecone.id.length > 128 || pineconeIds.has(pinecone.id) || typeof pinecone.content !== "string" || codePointLength(pinecone.content) > MAX_PINECONE_CODE_POINTS) return invalid("VALIDATION_FAILED");
+    if (pinecone.shelfId != null && pinecone.shelfId !== "" && !shelfIds.has(pinecone.shelfId)) return invalid("VALIDATION_FAILED");
+    pineconeIds.add(pinecone.id);
+  }
+  if (!hasValidReferences(snapshot.document, pineconeIds, shelfIds) || !hasValidReferences(snapshot.shelves, pineconeIds, shelfIds)) return invalid("VALIDATION_FAILED");
   return ok();
+}
+
+function hasBoundedShape(root) {
+  const stack = [{ value: root, depth: 0 }];
+  let nodes = 0;
+  while (stack.length) {
+    const { value, depth } = stack.pop();
+    nodes += 1;
+    if (nodes > MAX_SNAPSHOT_NODES || depth > MAX_SNAPSHOT_DEPTH) return false;
+    if (typeof value === "string" && codePointLength(value) > MAX_TOTAL_CODE_POINTS) return false;
+    if (Array.isArray(value)) {
+      for (const item of value) stack.push({ value: item, depth: depth + 1 });
+    } else if (isObject(value)) {
+      for (const item of Object.values(value)) stack.push({ value: item, depth: depth + 1 });
+    }
+  }
+  return true;
+}
+
+function hasValidReferences(value, pineconeIds, shelfIds) {
+  if (Array.isArray(value)) return value.every((item) => hasValidReferences(item, pineconeIds, shelfIds));
+  if (!isObject(value)) return true;
+  if ("pineconeIds" in value && (!Array.isArray(value.pineconeIds) || value.pineconeIds.some((id) => !pineconeIds.has(id)))) return false;
+  if ("shelfId" in value && value.shelfId != null && value.shelfId !== "" && !shelfIds.has(value.shelfId)) return false;
+  return Object.values(value).every((item) => hasValidReferences(item, pineconeIds, shelfIds));
 }
 
 export function validateOrganizeRequest(request) {

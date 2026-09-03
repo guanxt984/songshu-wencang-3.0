@@ -81,6 +81,20 @@ test("unknown service failures return a safe 500 instead of a validation error",
   assert.deepEqual(await response.json(), { error: { code: "INTERNAL_ERROR", message: "服务暂时不可用" } });
 });
 
+test("driver error codes and malformed path encodings are never exposed", async () => {
+  const driverFailure = createApiHandler({
+    authService: { getSession: async () => ({ userId: "user-a", email: "a@example.com" }) },
+    warehouseService: { listWarehouses: async () => { throw Object.assign(new Error("duplicate"), { code: "23505" }); } },
+    allowedOrigins: ["https://app.example.com"],
+  });
+  const response = await driverFailure(new Request("https://app.example.com/api/warehouses", { headers: { cookie: "nestnote_session=x" } }));
+  assert.equal(response.status, 500);
+  assert.equal((await response.json()).error.code, "INTERNAL_ERROR");
+
+  const malformed = await driverFailure(new Request("https://app.example.com/api/warehouses/%", { headers: { cookie: "nestnote_session=x" } }));
+  assert.equal(malformed.status, 422);
+});
+
 test("handler rejects malformed JSON, oversized bodies, and unknown routes", async () => {
   const handle = setup();
   const malformed = await handle(new Request("https://api.example.com/api/auth/email-code", {

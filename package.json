@@ -5,6 +5,6 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check app.js && node --check server.mjs && node --check organizer.js && node --check contracts/validators.js && node --check api/auth-service.js && node --check api/http-handler.js && node --check api/memory-auth-repository.js && node --test --test-isolation=none warehouse-management.test.mjs organizer.test.mjs contracts/contract.test.mjs api/auth-service.test.mjs api/http-handler.test.mjs api/auth-contract.test.mjs && node test-ui-content.cjs"
+    "check": "node --check app.js && node --check server.mjs && node --check organizer.js && node --check contracts/validators.js && node --check api/auth-service.js && node --check api/http-handler.js && node --check api/memory-auth-repository.js && node --check api/warehouse-service.js && node --check api/memory-warehouse-repository.js && node --test --test-isolation=none warehouse-management.test.mjs organizer.test.mjs contracts/contract.test.mjs api/auth-service.test.mjs api/http-handler.test.mjs api/auth-contract.test.mjs api/warehouse-service.test.mjs api/warehouse-http.test.mjs && node test-ui-content.cjs"
   }
 }
