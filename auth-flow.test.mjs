@@ -62,3 +62,31 @@ test("api errors are shown safely and logout returns to the email step", async (
   assert.equal((await flow.logout()).status, "email");
   assert.equal(logoutHeaders["x-csrf-token"], "csrf");
 });
+
+test("guest access persists locally and restores without calling the auth API", async () => {
+  const storage = new Map();
+  let apiCalls = 0;
+  const options = {
+    guestStorage: { getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
+    fetchImpl: async () => { apiCalls += 1; return response(500); },
+  };
+  const first = createAuthFlow(options);
+  assert.equal(first.enterGuest().user.isGuest, true);
+
+  const restored = createAuthFlow(options);
+  assert.equal((await restored.restore()).user.id, "guest");
+  assert.equal(apiCalls, 0);
+});
+
+test("leaving guest mode clears only the local guest marker", async () => {
+  const storage = new Map();
+  let apiCalls = 0;
+  const flow = createAuthFlow({
+    guestStorage: { getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
+    fetchImpl: async () => { apiCalls += 1; return response(500); },
+  });
+  flow.enterGuest();
+  assert.equal((await flow.logout()).status, "email");
+  assert.equal(storage.size, 0);
+  assert.equal(apiCalls, 0);
+});

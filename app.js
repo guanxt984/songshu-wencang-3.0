@@ -320,6 +320,11 @@ function renderAuthGate() {
             <button class="auth-primary" type="submit" ${isBusy ? "disabled" : ""}>${authState.status === "sending" ? "正在发送…" : "获取邮箱验证码"}</button>
           </form>
         `}
+        ${!isCodeStep && authState.status !== "loading" ? `
+          <div class="auth-divider"><span>或</span></div>
+          <button class="auth-secondary" type="button" data-auth-action="enter-guest" ${isBusy ? "disabled" : ""}>暂不登录，访客使用</button>
+          <p class="auth-guest-note">访客数据仅保存在当前浏览器，请勿清理浏览器数据。</p>
+        ` : ""}
         <p class="auth-footnote">登录即表示你同意仅将账号数据用于松鼠文仓公开测试。</p>
       </main>
     </section>
@@ -360,6 +365,11 @@ function bindAuthEvents() {
     authState = authFlow.getState();
     render();
   });
+  document.querySelector("[data-auth-action='enter-guest']")?.addEventListener("click", () => {
+    authState = authFlow.enterGuest();
+    state = loadState(authState.user.id);
+    render();
+  });
 }
 
 function scheduleResendCountdown() {
@@ -376,7 +386,9 @@ function scheduleResendCountdown() {
 }
 
 function renderAccountControl() {
-  return `<div class="account-control"><span>${escapeHtml(authState.user?.email || "")}</span><button type="button" data-auth-action="logout">退出登录</button></div>`;
+  const label = authState.user?.isGuest ? "游客" : authState.user?.email || "";
+  const actionLabel = authState.user?.isGuest ? "使用邮箱登录" : "退出登录";
+  return `<div class="account-control"><span>${escapeHtml(label)}</span><button type="button" data-auth-action="logout">${actionLabel}</button></div>`;
 }
 
 function isLocalDevelopmentHost() {

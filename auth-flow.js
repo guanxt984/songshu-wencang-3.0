@@ -1,4 +1,6 @@
-export function createAuthFlow({ fetchImpl = fetch, clock = () => Date.now() } = {}) {
+const GUEST_SESSION_KEY = "squirrel-warehouse-guest-session";
+
+export function createAuthFlow({ fetchImpl = fetch, clock = () => Date.now(), guestStorage = browserGuestStorage() } = {}) {
   let state = { status: "loading", email: "", user: null, csrfToken: "", retryUntil: 0, error: "" };
 
   const update = (patch) => (state = { ...state, ...patch });
@@ -20,6 +22,9 @@ export function createAuthFlow({ fetchImpl = fetch, clock = () => Date.now() } =
     },
     async restore() {
       update({ status: "loading", error: "" });
+      if (guestStorage?.getItem(GUEST_SESSION_KEY) === "active") {
+        return update({ status: "authenticated", user: guestUser(), csrfToken: "", error: "" });
+      }
       try {
         const payload = await call("/api/auth/session");
         return update({ status: "authenticated", user: payload.user, csrfToken: payload.csrfToken, error: "" });
@@ -27,6 +32,10 @@ export function createAuthFlow({ fetchImpl = fetch, clock = () => Date.now() } =
         if (error.code !== "AUTH_REQUIRED") throw error;
         return update({ status: "email", user: null, error: "" });
       }
+    },
+    enterGuest() {
+      guestStorage?.setItem(GUEST_SESSION_KEY, "active");
+      return update({ status: "authenticated", user: guestUser(), csrfToken: "", error: "" });
     },
     async requestCode(email) {
       const normalized = String(email || "").trim().toLowerCase();
@@ -58,8 +67,20 @@ export function createAuthFlow({ fetchImpl = fetch, clock = () => Date.now() } =
       }
     },
     async logout() {
+      if (state.user?.isGuest) {
+        guestStorage?.removeItem(GUEST_SESSION_KEY);
+        return update({ status: "email", email: "", user: null, csrfToken: "", error: "" });
+      }
       await call("/api/auth/logout", { method: "POST", headers: { "x-csrf-token": state.csrfToken } });
       return update({ status: "email", email: "", user: null, csrfToken: "", error: "" });
     },
   };
+}
+
+function guestUser() {
+  return { id: "guest", email: "", isGuest: true };
+}
+
+function browserGuestStorage() {
+  return typeof localStorage === "undefined" ? null : localStorage;
 }
