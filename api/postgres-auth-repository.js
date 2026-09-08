@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 
 const DAY = 24 * 60 * 60_000;
 const MAX_TRANSACTION_ATTEMPTS = 3;
+const FAILED_ATTEMPTS_CONSTRAINTS = new Set([
+  "email_challenges_failed_attempts_check",
+  "email_challenges_failed_attempts_v2",
+]);
 const SAFE_ERROR_CODES = new Set([
   "EMAIL_CODE_COOLDOWN",
   "EMAIL_CODE_DAILY_LIMIT",
@@ -249,9 +253,15 @@ function isRetryable(error) {
 function mapDatabaseError(error) {
   if (error && SAFE_ERROR_CODES.has(error.code)) return error;
   if (error?.code === "23505" && error.constraint === "email_challenges_one_active_per_email") return repositoryError("EMAIL_CODE_COOLDOWN");
-  if (error?.code === "23514" && error.constraint === "email_challenges_failed_attempts_v2") return repositoryError("VALIDATION_FAILED");
-  if (error?.code === "57014" || isRetryable(error)) return repositoryError("SERVICE_UNAVAILABLE");
+  if (error?.code === "23514" && FAILED_ATTEMPTS_CONSTRAINTS.has(error.constraint)) return repositoryError("VALIDATION_FAILED");
+  if (error?.code === "57014" || isRetryable(error) || isTimeout(error)) return repositoryError("SERVICE_UNAVAILABLE");
   return repositoryError("INTERNAL_ERROR");
+}
+
+function isTimeout(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return error?.code === "ETIMEDOUT" || message === "timeout exceeded when trying to connect" ||
+    message === "connection terminated due to connection timeout";
 }
 
 function repositoryError(code) {

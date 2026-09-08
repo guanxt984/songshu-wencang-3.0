@@ -130,6 +130,7 @@ test("reservation bounds deadlock retries and strips database details", async ()
 
 for (const [driverCode, constraint, expected] of [
   ["23505", "email_challenges_one_active_per_email", "EMAIL_CODE_COOLDOWN"],
+  ["23514", "email_challenges_failed_attempts_check", "VALIDATION_FAILED"],
   ["23514", "email_challenges_failed_attempts_v2", "VALIDATION_FAILED"],
   ["23505", "email_challenges_pkey", "INTERNAL_ERROR"],
   ["57014", undefined, "SERVICE_UNAVAILABLE"],
@@ -138,6 +139,20 @@ for (const [driverCode, constraint, expected] of [
     const error = Object.assign(new Error("SQL and credentials"), { code: driverCode, constraint });
     const { repository } = setup([[], [], [], [], [{ count: "0" }], [{ count: "0" }], [], error]);
     await assert.rejects(repository.reserveChallenge(challenge, limits), { code: expected, message: expected });
+  });
+}
+
+for (const [name, error] of [
+  ["pool acquisition timeout", new Error("timeout exceeded when trying to connect")],
+  ["connection timeout", new Error("Connection terminated due to connection timeout")],
+  ["socket timeout code", Object.assign(new Error("connect ETIMEDOUT 203.0.113.1:5432"), { code: "ETIMEDOUT" })],
+]) {
+  test(`maps ${name} to a safe service-unavailable error`, async () => {
+    const { repository } = setup([error]);
+    await assert.rejects(repository.findSessionByHash("hash-value"), {
+      code: "SERVICE_UNAVAILABLE",
+      message: "SERVICE_UNAVAILABLE",
+    });
   });
 }
 
