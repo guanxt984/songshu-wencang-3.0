@@ -50,6 +50,18 @@ export function createMemoryAuthRepository() {
       item.consumedAt = consumedAt;
       return true;
     },
+    consumeChallengeAndCreateSession({ challengeId, emailNormalized, consumedAt, session }) {
+      const challenge = challenges.find((candidate) => candidate.id === challengeId);
+      if (!challenge || challenge.consumedAt || challenge.emailNormalized !== emailNormalized ||
+        challenge.failedAttempts >= 5 || challenge.expiresAt < consumedAt) return null;
+      const existingUser = users.find((candidate) => candidate.emailNormalized === emailNormalized);
+      if (existingUser && existingUser.status !== "active") throw repositoryError("AUTH_REQUIRED");
+      const user = existingUser || { id: randomUUID(), emailNormalized, status: "active", createdAt: consumedAt };
+      if (!existingUser) users.push(user);
+      challenge.consumedAt = consumedAt;
+      sessions.push({ ...session, userId: user.id });
+      return user;
+    },
     recordFailedAttempt(id, failedAt, maximumAttempts) {
       const item = challenges.find((candidate) => candidate.id === id);
       if (!item || item.consumedAt) return null;

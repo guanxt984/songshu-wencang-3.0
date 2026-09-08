@@ -58,18 +58,21 @@ export function createAuthService({ repository, mailer, clock = () => new Date()
         throw authError("EMAIL_CODE_INVALID");
       }
 
-      if (!await repository.consumeChallengeIfActive(challenge.id, now)) throw authError("EMAIL_CODE_INVALID");
-      const user = await repository.findOrCreateUser(emailNormalized, now);
       const sessionToken = randomBytes(32).toString("hex");
-      await repository.createSession({
+      const user = await repository.consumeChallengeAndCreateSession({
+        challengeId: challenge.id,
+        emailNormalized,
+        consumedAt: now,
+        session: {
         id: randomUUID(),
-        userId: user.id,
         tokenHash: hashToken(sessionToken),
         expiresAt: new Date(now.getTime() + 7 * DAY),
         absoluteExpiresAt: new Date(now.getTime() + 30 * DAY),
         revokedAt: null,
         createdAt: now,
+        },
       });
+      if (!user) throw authError("EMAIL_CODE_INVALID");
       return { sessionToken, user: { id: user.id, email: user.emailNormalized } };
     },
 

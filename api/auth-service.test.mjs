@@ -177,3 +177,36 @@ test("sessions renew on activity but never extend beyond thirty days", async () 
   await fresh.service.logout(login.sessionToken);
   assert.equal(await fresh.service.getSession(login.sessionToken), null);
 });
+
+test("verification delegates the complete login write to the atomic repository operation", async () => {
+  const repository = createMemoryAuthRepository();
+  let captured;
+  const service = createAuthService({
+    repository: { ...repository, async consumeChallengeAndCreateSession(input) {
+      captured = input;
+      throw Object.assign(new Error("SERVICE_UNAVAILABLE"), { code: "SERVICE_UNAVAILABLE" });
+    } },
+    mailer: { sendCode: async () => {} }, clock: () => new Date("2026-09-08T12:00:00Z"),
+    randomInt: () => 123456, secret: "test-secret",
+  });
+  await service.requestEmailCode({ email: "a@example.com", ip: "203.0.113.10" });
+  await assert.rejects(service.verifyEmailCode({ email: "a@example.com", code: "123456" }), { code: "SERVICE_UNAVAILABLE" });
+  assert.equal(captured.challengeId, repository.inspectChallenges()[0].id);
+  assert.equal(captured.emailNormalized, "a@example.com");
+  assert.deepEqual(captured.consumedAt, new Date("2026-09-08T12:00:00Z"));
+  assert.match(captured.session.tokenHash, /^[a-f0-9]{64}$/);
+  assert.equal(repository.inspectChallenges()[0].consumedAt, null);
+  assert.deepEqual(repository.inspectSessions(), []);
+});
+
+test("memory atomic login does not consume a challenge for an inactive account", () => {
+  const repository = createMemoryAuthRepository();
+  const now = new Date("2026-09-08T12:00:00Z");
+  const user = repository.findOrCreateUser("a@example.com", now);
+  user.status = "deleted";
+  repository.createChallenge({ id: "challenge", emailNormalized: "a@example.com", consumedAt: null,
+    expiresAt: new Date(now.getTime() + 60_000), failedAttempts: 0 });
+  assert.throws(() => repository.consumeChallengeAndCreateSession({ challengeId: "challenge", emailNormalized: "a@example.com", consumedAt: now, session: {} }), { code: "AUTH_REQUIRED" });
+  assert.equal(repository.inspectChallenges()[0].consumedAt, null);
+  assert.deepEqual(repository.inspectSessions(), []);
+});
