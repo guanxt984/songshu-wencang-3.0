@@ -43,6 +43,7 @@ export function createPostgresWarehouseRepository({ database } = {}) {
     },
 
     async get(userId, id) {
+      if (!isWarehouseId(id)) return null;
       return safe(async () => {
         const result = await database.query(
           `SELECT ${WAREHOUSE_COLUMNS} FROM warehouses WHERE user_id = $1 AND id = $2`,
@@ -70,6 +71,7 @@ export function createPostgresWarehouseRepository({ database } = {}) {
     },
 
     async updateIfRevision(userId, id, revision, patch) {
+      if (!isWarehouseId(id)) return { outcome: "not_found" };
       return safe(async () => database.withTransaction(async (client) => {
         const current = await client.query(
           `SELECT ${WAREHOUSE_COLUMNS} FROM warehouses WHERE user_id = $1 AND id = $2 FOR UPDATE`,
@@ -90,6 +92,7 @@ export function createPostgresWarehouseRepository({ database } = {}) {
     },
 
     async deleteReadyIfRevision(userId, id, revision) {
+      if (!isWarehouseId(id)) return "not_found";
       return safe(async () => database.withTransaction(async (client) => {
         await lockOwner(client, userId);
         const current = await client.query(
@@ -253,6 +256,10 @@ function mapBatch(row) {
 function sameIdSet(currentIds, ids) {
   return Array.isArray(ids) && currentIds.length === ids.length &&
     new Set(ids).size === ids.length && ids.every((id) => currentIds.includes(id));
+}
+
+function isWarehouseId(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function date(value) {

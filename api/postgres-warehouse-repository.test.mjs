@@ -3,19 +3,21 @@ import test from "node:test";
 import { createPostgresWarehouseRepository } from "./postgres-warehouse-repository.js";
 
 const now = new Date("2026-09-08T00:00:00Z");
+const warehouseId = "00000000-0000-4000-8000-000000000001";
+const missingWarehouseId = "00000000-0000-4000-8000-000000000099";
 const row = {
-  id: "warehouse-id", user_id: "user-id", name: "产品资料", position: 0,
+  id: warehouseId, user_id: "user-id", name: "产品资料", position: 0,
   schema_version: 1, revision: 2, status: "ready", active_ai_job_id: null,
   snapshot: { version: 1, warehouse: {} }, created_at: now, updated_at: now,
 };
 const mapped = {
-  id: "warehouse-id", userId: "user-id", name: "产品资料", position: 0,
+  id: warehouseId, userId: "user-id", name: "产品资料", position: 0,
   schemaVersion: 1, revision: 2, status: "ready", activeAiJobId: null,
   snapshot: { version: 1, warehouse: {} }, createdAt: now, updatedAt: now,
 };
 const owner = [{ warehouse_order_revision: 4 }];
 const record = {
-  id: "warehouse-id", revision: 0, status: "ready",
+  id: warehouseId, revision: 0, status: "ready",
   snapshot: { version: 1, name: "产品资料", pinecones: [], shelves: [], document: {} },
   createdAt: now, updatedAt: now,
 };
@@ -44,9 +46,9 @@ function setup(responses = []) {
   return { database, repository: createPostgresWarehouseRepository({ database }), exhausted: () => assert.equal(responses.length, 0) };
 }
 
-function assertOwned(call) {
+function assertOwned(call, userId = "user-id", id = warehouseId) {
   assert.match(call.text, /user_id = \$1 AND id = \$2/);
-  assert.deepEqual(call.values.slice(0, 2), ["user-id", "warehouse-id"]);
+  assert.deepEqual(call.values.slice(0, 2), [userId, id]);
 }
 
 function assertTransaction(database) {
@@ -57,15 +59,25 @@ function assertTransaction(database) {
 
 test("get scopes by owner and ID, maps complete rows, and clones JSON and dates", async () => {
   const { repository, database } = setup([[row], []]);
-  const result = await repository.get("user-id", "warehouse-id");
+  const result = await repository.get("user-id", warehouseId);
   assert.deepEqual(result, mapped);
   result.snapshot.warehouse.changed = true;
   result.createdAt.setFullYear(2000);
   assert.deepEqual(row.snapshot, { version: 1, warehouse: {} });
   assert.equal(now.getUTCFullYear(), 2026);
   assertOwned(database.calls[0]);
-  assert.equal(await repository.get("other-user", "warehouse-id"), null);
-  assert.deepEqual(database.calls[1].values, ["other-user", "warehouse-id"]);
+  assert.equal(await repository.get("other-user", warehouseId), null);
+  assert.deepEqual(database.calls[1].values, ["other-user", warehouseId]);
+});
+
+test("get treats malformed and valid-but-absent UUIDs as missing warehouses", async () => {
+  const malformed = setup();
+  assert.equal(await malformed.repository.get("user-id", "not-a-uuid"), null);
+  assert.equal(malformed.database.calls.length, 0);
+
+  const absent = setup([[]]);
+  assert.equal(await absent.repository.get("user-id", missingWarehouseId), null);
+  assert.deepEqual(absent.database.calls[0].values, ["user-id", missingWarehouseId]);
 });
 
 test("list and order revision come from one statement snapshot including an empty account", async () => {
@@ -95,7 +107,7 @@ for (const [existing, revision, outcome] of [
 ]) {
   test(`save returns ${outcome} without writing`, async () => {
     const { repository, database, exhausted } = setup([existing]);
-    assert.deepEqual(await repository.updateIfRevision("user-id", "warehouse-id", revision, { snapshot: record.snapshot, updatedAt: now }), { outcome });
+    assert.deepEqual(await repository.updateIfRevision("user-id", warehouseId, revision, { snapshot: record.snapshot, updatedAt: now }), { outcome });
     assertOwned(database.calls[0]);
     assert.match(database.calls[0].text, /FOR UPDATE/);
     assertTransaction(database);
@@ -104,7 +116,7 @@ for (const [existing, revision, outcome] of [
 
   test(`delete returns ${outcome} after locking the owner and record without writing`, async () => {
     const { repository, database, exhausted } = setup([owner, existing]);
-    assert.equal(await repository.deleteReadyIfRevision("user-id", "warehouse-id", revision), outcome);
+    assert.equal(await repository.deleteReadyIfRevision("user-id", warehouseId, revision), outcome);
     assert.match(database.calls[0].text, /FROM users WHERE id = \$1 FOR UPDATE/);
     assertOwned(database.calls[1]);
     assert.match(database.calls[1].text, /FOR UPDATE/);
@@ -113,15 +125,39 @@ for (const [existing, revision, outcome] of [
   });
 }
 
+test("save treats malformed and valid-but-absent UUIDs as not found", async () => {
+  const malformed = setup();
+  assert.deepEqual(await malformed.repository.updateIfRevision("user-id", "not-a-uuid", 2, { snapshot: record.snapshot, updatedAt: now }), { outcome: "not_found" });
+  assert.equal(malformed.database.calls.length, 0);
+  assert.equal(malformed.database.transactions, 0);
+
+  const absent = setup([[]]);
+  assert.deepEqual(await absent.repository.updateIfRevision("user-id", missingWarehouseId, 2, { snapshot: record.snapshot, updatedAt: now }), { outcome: "not_found" });
+  assertOwned(absent.database.calls[0], "user-id", missingWarehouseId);
+  assertTransaction(absent.database);
+});
+
+test("delete treats malformed and valid-but-absent UUIDs as not found", async () => {
+  const malformed = setup();
+  assert.equal(await malformed.repository.deleteReadyIfRevision("user-id", "not-a-uuid", 2), "not_found");
+  assert.equal(malformed.database.calls.length, 0);
+  assert.equal(malformed.database.transactions, 0);
+
+  const absent = setup([owner, []]);
+  assert.equal(await absent.repository.deleteReadyIfRevision("user-id", missingWarehouseId, 2), "not_found");
+  assertOwned(absent.database.calls[1], "user-id", missingWarehouseId);
+  assertTransaction(absent.database);
+});
+
 test("save increments revision and synchronizes snapshot metadata with owner-scoped UPDATE", async () => {
   const updatedRow = { ...row, revision: 3, snapshot: record.snapshot };
   const { repository, database } = setup([[row], [updatedRow]]);
-  const result = await repository.updateIfRevision("user-id", "warehouse-id", 2, { snapshot: record.snapshot, updatedAt: now });
+  const result = await repository.updateIfRevision("user-id", warehouseId, 2, { snapshot: record.snapshot, updatedAt: now });
   assert.deepEqual(result, { outcome: "updated", warehouse: { ...mapped, revision: 3, snapshot: record.snapshot } });
   assertOwned(database.calls[1]);
   assert.match(database.calls[1].text, /revision = revision \+ 1/);
   assert.match(database.calls[1].text, /name = \$3, schema_version = \$4, snapshot = \$5::jsonb, updated_at = \$6::timestamptz/);
-  assert.deepEqual(database.calls[1].values, ["user-id", "warehouse-id", "产品资料", 1, JSON.stringify(record.snapshot), now]);
+  assert.deepEqual(database.calls[1].values, ["user-id", warehouseId, "产品资料", 1, JSON.stringify(record.snapshot), now]);
   assertTransaction(database);
 });
 
@@ -130,7 +166,7 @@ test("create locks the owner, checks capacity, appends a record and advances ord
   assert.deepEqual(await repository.create("user-id", record), { ...mapped, position: 3, revision: 0, snapshot: record.snapshot });
   assert.match(database.calls[0].text, /FROM users WHERE id = \$1 FOR UPDATE/);
   assert.match(database.calls[1].text, /WHERE user_id = \$1/);
-  assert.deepEqual(database.calls[2].values, ["user-id", "warehouse-id", "产品资料", 3, 1, 0, "ready", null, JSON.stringify(record.snapshot), now, now]);
+  assert.deepEqual(database.calls[2].values, ["user-id", warehouseId, "产品资料", 3, 1, 0, "ready", null, JSON.stringify(record.snapshot), now, now]);
   assert.match(database.calls[3].text, /warehouse_order_revision = warehouse_order_revision \+ 1 WHERE id = \$1/);
   assertTransaction(database);
 });
@@ -144,7 +180,7 @@ test("create rejects a full account before inserting", async () => {
 
 test("delete defers uniqueness, removes only the owned record, compacts positions and advances order", async () => {
   const { repository, database } = setup([owner, [row], [], [], [], [{ warehouse_order_revision: 5 }]]);
-  assert.equal(await repository.deleteReadyIfRevision("user-id", "warehouse-id", 2), "deleted");
+  assert.equal(await repository.deleteReadyIfRevision("user-id", warehouseId, 2), "deleted");
   assert.match(database.calls[2].text, /SET CONSTRAINTS warehouses_user_id_position_key DEFERRED/);
   assertOwned(database.calls[3]);
   assert.match(database.calls[3].text, /^DELETE FROM warehouses/);
@@ -157,32 +193,32 @@ test("delete defers uniqueness, removes only the owned record, compacts position
 test("reorder locks owner and rows, defers uniqueness, updates via ordinality and returns sorted rows", async () => {
   const other = { ...row, id: "second-id", position: 1 };
   const { repository, database } = setup([owner, [row, other], [], [], [{ warehouse_order_revision: 5 }], [{ ...other, position: 0 }, { ...row, position: 1 }]]);
-  const result = await repository.reorderIfRevision("user-id", 4, ["second-id", "warehouse-id"]);
+  const result = await repository.reorderIfRevision("user-id", 4, ["second-id", warehouseId]);
   assert.equal(result.outcome, "updated");
   assert.equal(result.revision, 5);
-  assert.deepEqual(result.warehouses.map(({ id, position }) => ({ id, position })), [{ id: "second-id", position: 0 }, { id: "warehouse-id", position: 1 }]);
+  assert.deepEqual(result.warehouses.map(({ id, position }) => ({ id, position })), [{ id: "second-id", position: 0 }, { id: warehouseId, position: 1 }]);
   assert.match(database.calls[0].text, /FROM users WHERE id = \$1 FOR UPDATE/);
   assert.match(database.calls[1].text, /WHERE user_id = \$1 ORDER BY position FOR UPDATE/);
   assert.match(database.calls[2].text, /SET CONSTRAINTS warehouses_user_id_position_key DEFERRED/);
   assert.match(database.calls[3].text, /unnest\(\$2::uuid\[\]\) WITH ORDINALITY/);
   assert.match(database.calls[3].text, /user_id = \$1/);
-  assert.deepEqual(database.calls[3].values, ["user-id", ["second-id", "warehouse-id"]]);
+  assert.deepEqual(database.calls[3].values, ["user-id", ["second-id", warehouseId]]);
   assertTransaction(database);
 });
 
 test("reorder rejects a stale order revision before changing positions", async () => {
   const { repository, database } = setup([owner]);
-  assert.deepEqual(await repository.reorderIfRevision("user-id", 3, ["warehouse-id"]), { outcome: "conflict" });
+  assert.deepEqual(await repository.reorderIfRevision("user-id", 3, [warehouseId]), { outcome: "conflict" });
   assertTransaction(database);
 });
 
 test("reorder returns organizing when any owned warehouse is busy", async () => {
   const { repository, database } = setup([owner, [{ ...row, status: "organizing" }]]);
-  assert.deepEqual(await repository.reorderIfRevision("user-id", 4, ["warehouse-id"]), { outcome: "organizing" });
+  assert.deepEqual(await repository.reorderIfRevision("user-id", 4, [warehouseId]), { outcome: "organizing" });
   assertTransaction(database);
 });
 
-for (const ids of [[], ["foreign-id"], ["warehouse-id", "warehouse-id"]]) {
+for (const ids of [[], ["foreign-id"], [warehouseId, warehouseId]]) {
   test(`reorder validates the exact owned ID set under lock: ${JSON.stringify(ids)}`, async () => {
     const { repository, database, exhausted } = setup([owner, [row]]);
     await assert.rejects(repository.reorderIfRevision("user-id", 4, ids), { code: "VALIDATION_FAILED" });
@@ -191,14 +227,14 @@ for (const ids of [[], ["foreign-id"], ["warehouse-id", "warehouse-id"]]) {
   });
 }
 
-const batchRow = { source_fingerprint: "fingerprint", result: { warehouses: [{ id: "warehouse-id", updatedAt: now.toISOString() }] } };
+const batchRow = { source_fingerprint: "fingerprint", result: { warehouses: [{ id: warehouseId, updatedAt: now.toISOString() }] } };
 
 test("getImportBatch filters owner/key and returns cloned recorded JSON or null", async () => {
   const { repository, database } = setup([[batchRow], []]);
   const result = await repository.getImportBatch("user-id", "batch-key");
   assert.deepEqual(result, { fingerprint: "fingerprint", result: batchRow.result });
   result.result.warehouses[0].id = "changed";
-  assert.equal(batchRow.result.warehouses[0].id, "warehouse-id");
+  assert.equal(batchRow.result.warehouses[0].id, warehouseId);
   assert.match(database.calls[0].text, /WHERE user_id = \$1 AND idempotency_key = \$2/);
   assert.deepEqual(database.calls[0].values, ["user-id", "batch-key"]);
   assert.equal(await repository.getImportBatch("other-user", "batch-key"), null);
@@ -230,7 +266,7 @@ test("import inserts all records, advances order once and returns the persisted 
   const second = { ...record, id: "second-id" };
   const { repository, database } = setup([owner, [], [{ count: 0 }], [row], [{ ...row, id: "second-id", position: 1 }], [{ warehouse_order_revision: 5 }], [batchRow]]);
   const result = await repository.importEmptyBatch("user-id", "batch-key", "fingerprint", [record, second], (stored) => {
-    assert.deepEqual(stored.map(({ id, position }) => ({ id, position })), [{ id: "warehouse-id", position: 0 }, { id: "second-id", position: 1 }]);
+    assert.deepEqual(stored.map(({ id, position }) => ({ id, position })), [{ id: warehouseId, position: 0 }, { id: "second-id", position: 1 }]);
     return batchRow.result;
   });
   assert.deepEqual(result, { fingerprint: "fingerprint", result: batchRow.result });
@@ -270,7 +306,7 @@ for (const [error, code] of [
 ]) {
   test(`database failure maps to safe ${code}: ${error.code || error.message}`, async () => {
     const { repository } = setup([error]);
-    await assert.rejects(repository.get("user-id", "warehouse-id"), { code, message: code });
+    await assert.rejects(repository.get("user-id", warehouseId), { code, message: code });
   });
 }
 
