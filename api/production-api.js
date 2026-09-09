@@ -9,13 +9,13 @@ import { createWarehouseService } from "./warehouse-service.js";
 const LOCAL_VERIFICATION_CODE = "123456";
 
 export function readProductionConfig(env = {}) {
-  const appEnvironment = String(env.APP_ENV || "development").trim().toLowerCase();
+  const appEnvironment = readAppEnvironment(env.APP_ENV);
   const databaseUrl = required(env.DATABASE_URL);
   const authHashSecret = required(env.AUTH_HASH_SECRET);
   const csrfTokenSecret = required(env.CSRF_TOKEN_SECRET);
   const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGINS, { production: appEnvironment === "production" });
 
-  if (!databaseUrl || !authHashSecret || !csrfTokenSecret || allowedOrigins.length === 0 ||
+  if (!appEnvironment || !databaseUrl || !authHashSecret || !csrfTokenSecret || allowedOrigins.length === 0 ||
     (appEnvironment === "production" && env.LOCAL_DEVELOPMENT_AUTH === "true")) {
     throw configurationError();
   }
@@ -51,8 +51,15 @@ export function createProductionApi({ env = {}, PoolClass, mailer } = {}) {
       allowedOrigins: config.allowedOrigins,
       secureCookies: config.appEnvironment === "production",
     }),
+    ready: () => database.query("SELECT 1"),
     close: () => database.close(),
   };
+}
+
+function readAppEnvironment(value) {
+  if (typeof value !== "string") return null;
+  const environment = value.trim().toLowerCase();
+  return environment === "development" || environment === "production" ? environment : null;
 }
 
 function required(value) {

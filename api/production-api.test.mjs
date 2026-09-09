@@ -31,6 +31,15 @@ test("production configuration rejects local development auth without exposing e
   });
 });
 
+test("production configuration rejects a missing, empty, or whitespace-only APP_ENV", () => {
+  for (const appEnvironment of [undefined, "", "   "]) {
+    const env = { ...productionEnv, LOCAL_DEVELOPMENT_AUTH: "true" };
+    if (appEnvironment === undefined) delete env.APP_ENV;
+    else env.APP_ENV = appEnvironment;
+    assert.throws(() => readProductionConfig(env), { message: "PRODUCTION_CONFIG_INVALID" });
+  }
+});
+
 test("production configuration normalizes comma-separated exact HTTPS origins", () => {
   assert.deepEqual(readProductionConfig(productionEnv), {
     appEnvironment: "production",

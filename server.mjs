@@ -20,7 +20,8 @@ export function selectApiComposition({
   createProductionApiFactory = createProductionApi,
   createLocalDevelopmentApiFactory = createLocalDevelopmentApi,
 } = {}) {
-  const appEnvironment = String(env.APP_ENV || "development").trim().toLowerCase();
+  const appEnvironment = readAppEnvironment(env.APP_ENV);
+  if (!appEnvironment) throw new Error("API_CONFIGURATION_INVALID");
   if (appEnvironment === "production" || env.DATABASE_URL) {
     return createProductionApiFactory({ env, mailer });
   }
@@ -91,10 +92,36 @@ export function registerGracefulShutdown(options) {
 export async function startServer({ env = process.env, mailer, root = process.cwd() } = {}) {
   const port = Number(env.PORT || 5173);
   const composition = selectApiComposition({ env, port, mailer });
-  const server = createApplicationServer({ apiHandler: composition.handle, root });
-  await listen(server, port);
-  const shutdown = registerGracefulShutdown({ server, close: composition.close || (async () => {}) });
-  console.log(`Listening on http://127.0.0.1:${port}`);
+  return startConfiguredServer({ composition, port, root });
+}
+
+export async function startConfiguredServer({
+  composition,
+  port,
+  root = process.cwd(),
+  createApplicationServerFactory = createApplicationServer,
+  listenServer = listen,
+  registerGracefulShutdownFactory = registerGracefulShutdown,
+  log = console.log,
+} = {}) {
+  if (!composition || typeof composition.handle !== "function") throw new Error("API_STARTUP_FAILED");
+  try {
+    if (typeof composition.ready === "function") await composition.ready();
+  } catch {
+    await closeQuietly(composition);
+    throw new Error("API_STARTUP_FAILED");
+  }
+
+  let server;
+  try {
+    server = createApplicationServerFactory({ apiHandler: composition.handle, root });
+    await listenServer(server, port);
+  } catch {
+    await closeQuietly(composition);
+    throw new Error("API_STARTUP_FAILED");
+  }
+  const shutdown = registerGracefulShutdownFactory({ server, close: composition.close || (async () => {}) });
+  log(`Listening on http://127.0.0.1:${port}`);
   return { server, composition, shutdown };
 }
 
@@ -133,6 +160,20 @@ function listen(server, port) {
     server.once("error", rejectListen);
     server.listen(port, "127.0.0.1", resolveListen);
   });
+}
+
+function readAppEnvironment(value) {
+  if (typeof value !== "string") return null;
+  const environment = value.trim().toLowerCase();
+  return environment === "development" || environment === "production" ? environment : null;
+}
+
+async function closeQuietly(composition) {
+  try {
+    if (typeof composition.close === "function") await composition.close();
+  } catch {
+    // Startup failures remain stable and must not expose connection details.
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

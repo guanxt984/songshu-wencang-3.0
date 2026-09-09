@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { writeWebResponse } from "./api/node-response.js";
-import { createGracefulShutdown, selectApiComposition } from "./server.mjs";
+import * as serverModule from "./server.mjs";
+
+const { createGracefulShutdown, selectApiComposition } = serverModule;
 
 test("node response forwards multiple set-cookie headers separately", async () => {
   const headers = new Headers();
@@ -44,6 +46,11 @@ test("server selects production composition before every other mode and fails cl
   assert.deepEqual(calls.map(([mode]) => mode), ["production", "production", "local"]);
   assert.deepEqual(calls[2][1], { allowedOrigins: ["http://127.0.0.1:5180", "http://localhost:5180"] });
   assert.throws(() => selectApiComposition({ env: { APP_ENV: "development" } }), { message: "API_CONFIGURATION_INVALID" });
+  for (const appEnvironment of [undefined, "", "   "]) {
+    const env = { LOCAL_DEVELOPMENT_AUTH: "true" };
+    if (appEnvironment !== undefined) env.APP_ENV = appEnvironment;
+    assert.throws(() => selectApiComposition({ env }), { message: "API_CONFIGURATION_INVALID" });
+  }
 });
 
 test("graceful shutdown closes HTTP before persistent resources and exits once", async () => {
@@ -67,4 +74,58 @@ test("graceful shutdown still releases persistent resources when HTTP close fail
   });
   await shutdown();
   assert.deepEqual(events, ["server", "composition", "exit:1"]);
+});
+
+test("database probe failure closes the composition before any HTTP server listens and stays secret-safe", async () => {
+  const events = [];
+  await assert.rejects(
+    () => serverModule.startConfiguredServer({
+      composition: {
+        handle() {},
+        ready: async () => {
+          events.push("probe");
+          throw new Error("postgresql://db-user:database-password@db.example.test/app");
+        },
+        close: async () => { events.push("close"); },
+      },
+      port: 5173,
+      createApplicationServerFactory: () => { events.push("server"); return {}; },
+      listenServer: async () => { events.push("listen"); },
+      registerGracefulShutdownFactory: () => { events.push("shutdown"); },
+      log: () => { events.push("log"); },
+    }),
+    (error) => {
+      assert.equal(error.message, "API_STARTUP_FAILED");
+      assert.doesNotMatch(error.message, /database-password|db\.example/);
+      return true;
+    },
+  );
+  assert.deepEqual(events, ["probe", "close"]);
+});
+
+test("server listens only after the PostgreSQL composition probe succeeds", async () => {
+  const events = [];
+  const composition = {
+    handle() {},
+    ready: async () => { events.push("probe"); },
+    close: async () => { events.push("close"); },
+  };
+  const server = {};
+  const result = await serverModule.startConfiguredServer({
+    composition,
+    port: 5173,
+    createApplicationServerFactory: () => { events.push("server"); return server; },
+    listenServer: async (receivedServer, port) => { events.push(`listen:${port}`); assert.equal(receivedServer, server); },
+    registerGracefulShutdownFactory: ({ server: receivedServer, close }) => {
+      events.push("shutdown");
+      assert.equal(receivedServer, server);
+      assert.equal(close, composition.close);
+      return "shutdown";
+    },
+    log: () => { events.push("log"); },
+  });
+  assert.equal(result.server, server);
+  assert.equal(result.composition, composition);
+  assert.equal(result.shutdown, "shutdown");
+  assert.deepEqual(events, ["probe", "server", "listen:5173", "shutdown", "log"]);
 });
