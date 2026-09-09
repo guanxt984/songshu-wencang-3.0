@@ -14,6 +14,19 @@ test("PostgreSQL test context explains missing TEST_DATABASE_URL", async () => {
   );
 });
 
+test("PostgreSQL test context reports a connection failure without exposing connection details", async () => {
+  let closed = false;
+  const database = {
+    async query() { throw new Error("connection details must stay private"); },
+    async close() { closed = true; },
+  };
+  await assert.rejects(
+    () => createPostgresTestContext({ connectionString: "configured-test-connection", databaseFactory: () => database }),
+    { code: "POSTGRES_TEST_DATABASE_UNAVAILABLE", message: "POSTGRES_TEST_DATABASE_UNAVAILABLE: unable to connect to TEST_DATABASE_URL" },
+  );
+  assert.equal(closed, true);
+});
+
 test("PostgreSQL test context refuses a database that is not explicitly a test database", async () => {
   let closed = false;
   const database = {
@@ -51,7 +64,7 @@ test("PostgreSQL test context truncates only the static application table list",
 });
 
 test("PostgreSQL authentication repositories preserve atomic auth behavior", async (t) => {
-  const first = await openContextOrSkip(t);
+  const first = await openContext(t);
   if (!first) return;
   const second = await createPostgresTestContext();
   t.after(async () => { await Promise.all([first.close(), second.close()]); });
@@ -70,6 +83,7 @@ test("PostgreSQL authentication repositories preserve atomic auth behavior", asy
     ]);
     assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
     assert.equal(results.filter(({ status }) => status === "rejected").length, 1);
+    assert.equal(results.find(({ status }) => status === "rejected").reason.code, "EMAIL_CODE_COOLDOWN");
     const active = await second.database.query("SELECT count(*)::integer AS count FROM email_challenges WHERE email_normalized = $1 AND consumed_at IS NULL", [challengeA.emailNormalized]);
     assert.equal(Number(active.rows[0].count), 1);
   });
@@ -117,11 +131,11 @@ test("PostgreSQL authentication repositories preserve atomic auth behavior", asy
   });
 });
 
-async function openContextOrSkip(t) {
+async function openContext(t) {
   try {
     return await createPostgresTestContext();
   } catch (error) {
-    if (error?.code === "POSTGRES_TEST_DATABASE_UNAVAILABLE") {
+    if (process.env.POSTGRES_TEST_OPTIONAL === "1" && error?.code === "POSTGRES_TEST_DATABASE_UNAVAILABLE") {
       t.skip(error.message);
       return null;
     }

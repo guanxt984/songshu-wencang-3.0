@@ -9,7 +9,7 @@ import { createPostgresWarehouseRepository } from "./postgres-warehouse-reposito
 const now = new Date("2026-09-09T12:00:00Z");
 
 test("PostgreSQL warehouse repositories enforce persistence, ownership, and atomic mutations", async (t) => {
-  const first = await openContextOrSkip(t);
+  const first = await openContext(t);
   if (!first) return;
   const second = await createPostgresTestContext();
   t.after(async () => { await Promise.all([first.close(), second.close()]); });
@@ -46,6 +46,8 @@ test("PostgreSQL warehouse repositories enforce persistence, ownership, and atom
     assert.deepEqual(await warehousesB.updateIfRevision(user.id, record.id, 0, { snapshot: snapshot("stale"), updatedAt: now }), { outcome: "conflict" });
     await second.database.query("UPDATE warehouses SET status = 'organizing' WHERE user_id = $1 AND id = $2", [user.id, record.id]);
     assert.deepEqual(await warehousesB.updateIfRevision(user.id, record.id, 1, { snapshot: snapshot("busy"), updatedAt: now }), { outcome: "organizing" });
+    assert.equal(await warehousesB.deleteReadyIfRevision(user.id, record.id, 1), "organizing");
+    assert.deepEqual(await warehousesB.reorderIfRevision(user.id, 1, [record.id]), { outcome: "organizing" });
   });
 
   await t.test("create and delete advance order revision, and reorder avoids transient position conflicts", async () => {
@@ -95,11 +97,11 @@ test("PostgreSQL warehouse repositories enforce persistence, ownership, and atom
   });
 });
 
-async function openContextOrSkip(t) {
+async function openContext(t) {
   try {
     return await createPostgresTestContext();
   } catch (error) {
-    if (error?.code === "POSTGRES_TEST_DATABASE_UNAVAILABLE") {
+    if (process.env.POSTGRES_TEST_OPTIONAL === "1" && error?.code === "POSTGRES_TEST_DATABASE_UNAVAILABLE") {
       t.skip(error.message);
       return null;
     }
