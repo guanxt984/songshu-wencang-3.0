@@ -28,10 +28,11 @@ test("environment template declares empty production secrets and explicit auth o
   assert.doesNotMatch(env, /EMAIL_PROVIDER_API_KEY=\S+/);
 });
 
-test("local server delegates API paths without exposing authentication secrets", async () => {
+test("server delegates API paths, selects explicit composition, and keeps configuration secrets out of source", async () => {
   const server = await readFile(serverPath, "utf8");
   assert.match(server, /url\.pathname\.startsWith\("\/api\/"\)/);
-  assert.match(server, /SERVICE_NOT_CONFIGURED/);
+  assert.match(server, /API_CONFIGURATION_INVALID/);
+  assert.match(server, /createProductionApi/);
   assert.match(server, /LOCAL_DEVELOPMENT_AUTH === "true"/);
   assert.match(server, /requestTimeout = 15_000/);
   assert.doesNotMatch(server, /createMemoryAuthRepository/);

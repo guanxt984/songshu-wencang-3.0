@@ -164,12 +164,14 @@ test("first database migration declares ownership and active job constraints", a
   assert.match(migration, /CREATE TRIGGER warehouses_limit_per_user/);
 });
 
-test("environment template keeps secrets empty and local check includes contract tests", async () => {
+test("environment template keeps every value empty and local check includes contract tests", async () => {
   const envExample = await readFile(new URL("../.env.example", import.meta.url), "utf8");
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
-  assert.match(envExample, /^APP_ENV=development$/m);
+  assert.match(envExample, /^APP_ENV=$/m);
+  assert.match(envExample, /^LOCAL_DEVELOPMENT_AUTH=$/m);
   assert.match(envExample, /^DATABASE_URL=$/m);
-  assert.match(envExample, /^SESSION_COOKIE_SECURE=false$/m);
+  assert.match(envExample, /^SESSION_COOKIE_SECURE=$/m);
+  assert.match(envExample, /^TEST_DATABASE_URL=$/m);
   assert.match(packageJson.scripts.check, /contracts\/contract\.test\.mjs/);
 });
