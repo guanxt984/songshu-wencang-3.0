@@ -7,6 +7,7 @@
   "EMAIL_CODE_INVALID": { "httpStatus": 422, "message": "验证码不正确或已失效" },
   "EMAIL_CODE_EXPIRED": { "httpStatus": 422, "message": "验证码已过期，请重新获取" },
   "EMAIL_DELIVERY_UNAVAILABLE": { "httpStatus": 503, "message": "验证码暂时无法发送，请稍后重试" },
+  "SERVICE_UNAVAILABLE": { "httpStatus": 503, "message": "服务暂时不可用，请稍后重试" },
   "ORIGIN_INVALID": { "httpStatus": 403, "message": "请求来源不受信任" },
   "FORBIDDEN": { "httpStatus": 403, "message": "无权访问此资源" },
   "CSRF_INVALID": { "httpStatus": 403, "message": "请求验证失败，请刷新后重试" },

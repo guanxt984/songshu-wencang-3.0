@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
 import { createPostgresDatabase } from "./postgres-database.js";
 
-class FakePool {
+class FakePool extends EventEmitter {
   static options;
   static transactionCommands;
   static released;
   static endCalls;
 
   constructor(options) {
+    super();
     FakePool.options = options;
     FakePool.transactionCommands = [];
     FakePool.released = 0;
@@ -86,4 +88,36 @@ test("closes the pool only once", async () => {
 
   await Promise.all([database.close(), database.close()]);
   assert.equal(FakePool.endCalls, 1);
+});
+
+test("handles idle pool errors safely without swallowing query failures or breaking close", async () => {
+  const pool = new EventEmitter();
+  const queryFailure = new Error("sensitive query and host details");
+  pool.query = async () => { throw queryFailure; };
+  pool.endCalls = 0;
+  pool.end = async () => { pool.endCalls += 1; };
+  const messages = [];
+  const database = createPostgresDatabase({
+    connectionString: "postgresql://example.invalid/test",
+    PoolClass: class { constructor() { return pool; } },
+    logger: { error: (message) => messages.push(message) },
+  });
+
+  assert.doesNotThrow(() => pool.emit("error", new Error("postgresql://secret@db.internal/app")));
+  assert.deepEqual(messages, ["POSTGRES_POOL_ERROR"]);
+  await assert.rejects(database.query("SELECT secret FROM private_table"), (error) => error === queryFailure);
+  await Promise.all([database.close(), database.close()]);
+  assert.equal(pool.endCalls, 1);
+});
+
+test("an idle pool error remains handled even when the injected logger fails", () => {
+  const pool = new EventEmitter();
+  pool.end = async () => {};
+  createPostgresDatabase({
+    connectionString: "postgresql://example.invalid/test",
+    PoolClass: class { constructor() { return pool; } },
+    logger: { error() { throw new Error("logger unavailable"); } },
+  });
+
+  assert.doesNotThrow(() => pool.emit("error", new Error("database unavailable")));
 });

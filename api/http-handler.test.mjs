@@ -39,6 +39,29 @@ test("email code request and verification return safe responses and secure cooki
   assert.match(payload.csrfToken, /^[a-f0-9]{32}$/);
 });
 
+test("email code requests use the configured client-IP resolver", async () => {
+  let receivedIp;
+  const handle = createApiHandler({
+    authService: {
+      requestEmailCode: async ({ ip }) => {
+        receivedIp = ip;
+        return { retryAfterSeconds: 60 };
+      },
+    },
+    allowedOrigins: ["https://app.example.com"],
+    resolveClientIp: (incoming) => incoming.socket.remoteAddress,
+  });
+  const incoming = request("/api/auth/email-code", {
+    method: "POST",
+    body: { email: "a@example.com" },
+    headers: { "x-forwarded-for": "192.0.2.250" },
+  });
+  Object.defineProperty(incoming, "socket", { value: { remoteAddress: "203.0.113.40" } });
+
+  assert.equal((await handle(incoming)).status, 202);
+  assert.equal(receivedIp, "203.0.113.40");
+});
+
 test("session endpoint authenticates from the session cookie", async () => {
   const handle = setup();
   await handle(request("/api/auth/email-code", { method: "POST", body: { email: "a@example.com" } }));
@@ -81,6 +104,27 @@ test("unknown service failures return a safe 500 instead of a validation error",
   const response = await handle(request("/api/auth/email-code", { method: "POST", body: { email: "a@example.com" } }));
   assert.equal(response.status, 500);
   assert.deepEqual(await response.json(), { error: { code: "INTERNAL_ERROR", message: "服务暂时不可用" } });
+});
+
+test("repository service-unavailable failures return a safe public 503", async () => {
+  const handle = createApiHandler({
+    authService: {
+      requestEmailCode: async () => {
+        throw Object.assign(new Error("postgresql://secret@db.internal/app"), { code: "SERVICE_UNAVAILABLE" });
+      },
+    },
+    allowedOrigins: ["https://app.example.com"],
+  });
+
+  const response = await handle(request("/api/auth/email-code", {
+    method: "POST",
+    body: { email: "a@example.com" },
+  }));
+
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.deepEqual(body, { error: { code: "SERVICE_UNAVAILABLE", message: "服务暂时不可用，请稍后重试" } });
+  assert.doesNotMatch(JSON.stringify(body), /postgresql|secret|db\.internal/i);
 });
 
 test("driver error codes and malformed path encodings are never exposed", async () => {

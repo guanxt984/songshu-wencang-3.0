@@ -47,4 +47,5 @@ test("authentication failures have stable safe error mappings", async () => {
   assert.equal(errors.ORIGIN_INVALID.httpStatus, 403);
   assert.equal(errors.INTERNAL_ERROR.httpStatus, 500);
   assert.equal(errors.SERVICE_NOT_CONFIGURED.httpStatus, 503);
+  assert.deepEqual(errors.SERVICE_UNAVAILABLE, { httpStatus: 503, message: "服务暂时不可用，请稍后重试" });
 });

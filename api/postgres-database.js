@@ -6,7 +6,7 @@ const defaultPoolOptions = {
   statement_timeout: 10_000,
 };
 
-export function createPostgresDatabase({ connectionString, poolOptions = {}, PoolClass = Pool } = {}) {
+export function createPostgresDatabase({ connectionString, poolOptions = {}, PoolClass = Pool, logger = console } = {}) {
   if (typeof connectionString !== "string" || connectionString.trim() === "") {
     throw new TypeError("connectionString is required");
   }
@@ -15,6 +15,13 @@ export function createPostgresDatabase({ connectionString, poolOptions = {}, Poo
     connectionString,
     ...poolOptions,
     ...defaultPoolOptions,
+  });
+  pool.on("error", () => {
+    try {
+      logger?.error?.("POSTGRES_POOL_ERROR");
+    } catch {
+      // A logging failure must not turn an already handled background pool error into an uncaught exception.
+    }
   });
   let closePromise;
 

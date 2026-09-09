@@ -1,6 +1,6 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, realpathSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLocalDevelopmentApi } from "./api/local-development.js";
 import { writeWebResponse } from "./api/node-response.js";
@@ -10,8 +10,20 @@ const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".png": "image/png",
   ".ttf": "font/ttf",
 };
+const PUBLIC_ROOT_FILES = new Set([
+  "index.html",
+  "styles.css",
+  "app.js",
+  "auth-flow.js",
+  "organizer.js",
+  "warehouse-management.js",
+  "example-warehouses.js",
+]);
+const PUBLIC_ASSET_EXTENSIONS = new Set([".png", ".ttf"]);
+const PRIVATE_ROUTE_ROOTS = new Set(["api", "contracts", "db", "docs", "node_modules", "scripts", ".superpowers"]);
 
 export function selectApiComposition({
   env = process.env,
@@ -35,7 +47,7 @@ export function selectApiComposition({
 
 export function createApplicationServer({ apiHandler, root = process.cwd() } = {}) {
   if (typeof apiHandler !== "function") throw new TypeError("apiHandler is required");
-  const resolvedRoot = resolve(root);
+  const resolvedRoot = realpathSync(resolve(root));
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
     if (url.pathname.startsWith("/api/")) {
@@ -46,9 +58,8 @@ export function createApplicationServer({ apiHandler, root = process.cwd() } = {
       }
       return;
     }
-    const requested = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
-    const filePath = normalize(join(resolvedRoot, requested));
-    if (!filePath.startsWith(resolvedRoot) || !existsSync(filePath)) {
+    const filePath = resolvePublicFile(resolvedRoot, url.pathname);
+    if (!filePath) {
       response.writeHead(404);
       response.end("Not found");
       return;
@@ -59,6 +70,40 @@ export function createApplicationServer({ apiHandler, root = process.cwd() } = {
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
   return server;
+}
+
+function resolvePublicFile(root, pathname) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  if (!decoded.startsWith("/") || decoded.includes("\\") || decoded.includes("\0")) return null;
+  const relative = decoded.slice(1);
+  const segments = relative ? relative.split("/") : [];
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.startsWith("."))) return null;
+
+  let publicRelative;
+  if (!relative) publicRelative = "index.html";
+  else if (PUBLIC_ROOT_FILES.has(relative)) publicRelative = relative;
+  else if (segments[0] === "assets" && segments.length > 1 && PUBLIC_ASSET_EXTENSIONS.has(extname(relative).toLowerCase())) {
+    publicRelative = relative;
+  } else if (!PRIVATE_ROUTE_ROOTS.has(segments[0]) && segments.every((segment) => !extname(segment))) {
+    publicRelative = "index.html";
+  } else {
+    return null;
+  }
+
+  const candidate = join(root, ...publicRelative.split("/"));
+  if (!existsSync(candidate)) return null;
+  try {
+    const realCandidate = realpathSync(candidate);
+    if (realCandidate !== root && !realCandidate.startsWith(`${root}${sep}`)) return null;
+    return statSync(realCandidate).isFile() ? realCandidate : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createGracefulShutdown({ server, close, exit = process.exit } = {}) {
@@ -134,12 +179,17 @@ async function toWebRequest(request) {
     bodyChunks.push(chunk);
   }
   const body = bodyChunks.length ? Buffer.concat(bodyChunks) : undefined;
-  return new Request(`http://${request.headers.host}${request.url}`, {
+  const webRequest = new Request(`http://${request.headers.host}${request.url}`, {
     method: request.method,
     headers: request.headers,
     body,
     ...(body ? { duplex: "half" } : {}),
   });
+  Object.defineProperties(webRequest, {
+    socket: { value: { remoteAddress: request.socket?.remoteAddress } },
+    connection: { value: { remoteAddress: request.connection?.remoteAddress } },
+  });
+  return webRequest;
 }
 
 function unavailableResponse() {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
 import { createProductionApi, readProductionConfig } from "./production-api.js";
@@ -129,16 +130,49 @@ test("production composition injects persistent services, sends mail, issues sec
   assert.equal(pool.ended, 1);
 });
 
-function request(path, { body }) {
-  return new Request(`https://app.example.test${path}`, {
+test("production composition sends a validated socket IP to PostgreSQL and ignores spoofed proxy headers", async () => {
+  for (const [socket, connection, expectedIp] of [
+    [{ remoteAddress: "203.0.113.40" }, { remoteAddress: "198.51.100.2" }, "203.0.113.40"],
+    [{ remoteAddress: "2001:db8::7" }, undefined, "2001:db8::7"],
+    [{ remoteAddress: "not-an-ip" }, { remoteAddress: "198.51.100.7" }, "198.51.100.7"],
+    [undefined, undefined, "0.0.0.0"],
+  ]) {
+    const pool = new FakePool();
+    const api = createProductionApi({
+      env: productionEnv,
+      PoolClass: class { constructor() { return pool; } },
+      mailer: { sendCode: async () => { pool.mailAttempts = (pool.mailAttempts || 0) + 1; } },
+    });
+    const codeRequest = request("/api/auth/email-code", {
+      body: { email: "person@example.test" },
+      headers: { "x-forwarded-for": "192.0.2.250" },
+      socket,
+      connection,
+    });
+
+    const response = await api.handle(codeRequest);
+
+    assert.equal(response.status, 202);
+    assert.equal(pool.challenge.request_ip, expectedIp);
+    assert.equal(pool.mailAttempts, 1);
+    await api.close();
+  }
+});
+
+function request(path, { body, headers = {}, socket, connection }) {
+  const webRequest = new Request(`https://app.example.test${path}`, {
     method: "POST",
-    headers: { origin: "https://app.example.test", "content-type": "application/json" },
+    headers: { origin: "https://app.example.test", "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
+  if (socket) Object.defineProperty(webRequest, "socket", { value: socket });
+  if (connection) Object.defineProperty(webRequest, "connection", { value: connection });
+  return webRequest;
 }
 
-class FakePool {
+class FakePool extends EventEmitter {
   constructor() {
+    super();
     this.challenge = null;
     this.sent = null;
     this.ended = 0;

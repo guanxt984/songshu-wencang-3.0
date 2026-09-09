@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { createAuthService } from "./auth-service.js";
 import { createApiHandler } from "./http-handler.js";
 import { createPostgresAuthRepository } from "./postgres-auth-repository.js";
@@ -50,10 +51,18 @@ export function createProductionApi({ env = {}, PoolClass, mailer } = {}) {
       warehouseService,
       allowedOrigins: config.allowedOrigins,
       secureCookies: config.appEnvironment === "production",
+      resolveClientIp: resolveSocketClientIp,
     }),
     ready: () => database.query("SELECT 1"),
     close: () => database.close(),
   };
+}
+
+export function resolveSocketClientIp(request) {
+  for (const address of [request?.socket?.remoteAddress, request?.connection?.remoteAddress]) {
+    if (typeof address === "string" && isIP(address)) return address;
+  }
+  return "0.0.0.0";
 }
 
 function readAppEnvironment(value) {
