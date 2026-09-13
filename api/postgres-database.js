@@ -13,6 +13,7 @@ export function createPostgresDatabase({ connectionString, poolOptions = {}, Poo
 
   const pool = new PoolClass({
     connectionString,
+    max: 5,
     ...poolOptions,
     ...defaultPoolOptions,
   });

@@ -153,7 +153,7 @@ export function createPostgresAuthRepository({ database } = {}) {
 
     async findUserById(id) {
       return safe(async () => {
-        const result = await database.query("SELECT id, email_normalized, status, created_at FROM users WHERE id = $1", [id]);
+        const result = await database.query("SELECT id, email_normalized, status, created_at, github_login FROM users WHERE id = $1", [id]);
         return result.rows[0] ? mapUser(result.rows[0]) : null;
       });
     },
@@ -233,7 +233,7 @@ function mapSession(row) {
 }
 
 function mapUser(row) {
-  return { id: row.id, emailNormalized: row.email_normalized, status: row.status, createdAt: date(row.created_at) };
+  return { id: row.id, emailNormalized: row.email_normalized, status: row.status, createdAt: date(row.created_at), ...(row.github_login ? { displayName: row.github_login } : {}) };
 }
 
 function mapActiveUser(row) {

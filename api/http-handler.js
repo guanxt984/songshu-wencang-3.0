@@ -30,6 +30,7 @@ export function createApiHandler({ authService, warehouseService, allowedOrigins
     try {
       const url = new URL(request.url);
       const route = `${request.method} ${url.pathname}`;
+      if (route === 'GET /api/auth/config') return json({ provider: 'email' });
       if (request.method !== "GET" && !trustedOrigins.has(request.headers.get("origin"))) {
         return errorResponse("ORIGIN_INVALID");
       }
@@ -56,7 +57,7 @@ export function createApiHandler({ authService, warehouseService, allowedOrigins
         const session = await authService.getSession(sessionToken);
         if (!session) return errorResponse("AUTH_REQUIRED");
         const csrfToken = randomBytes(16).toString("hex");
-        const response = json({ user: { id: session.userId, email: session.email }, csrfToken });
+        const response = json({ user: { id: session.userId, email: session.email, ...(session.displayName ? { displayName: session.displayName } : {}) }, csrfToken });
         response.headers.append("set-cookie", cookie(sessionCookieName, sessionToken, { httpOnly: true, secure: secureCookies, maxAge: 7 * 24 * 60 * 60 }));
         response.headers.append("set-cookie", cookie("nestnote_csrf", csrfToken, { httpOnly: false, secure: secureCookies, maxAge: 7 * 24 * 60 * 60 }));
         return response;

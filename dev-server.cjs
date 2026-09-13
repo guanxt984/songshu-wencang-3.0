@@ -16,6 +16,7 @@ const publicRootFiles = new Set([
   "styles.css",
   "app.js",
   "auth-flow.js",
+  "cloud-warehouse-store.js",
   "organizer.js",
   "warehouse-management.js",
   "example-warehouses.js",

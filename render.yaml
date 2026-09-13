@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: squirrel-warehouse
+    runtime: node
+    plan: starter
+    region: singapore
+    numInstances: 1
+    buildCommand: npm ci && npm run check
+    startCommand: npm run start:render
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: 24.13.0
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: AUTH_PROVIDER
+        value: github
+      - key: DATABASE_URL
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: AUTH_HASH_SECRET
+        generateValue: true
+      - key: CSRF_TOKEN_SECRET
+        generateValue: true

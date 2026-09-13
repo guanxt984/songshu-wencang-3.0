@@ -1,7 +1,7 @@
 const GUEST_SESSION_KEY = "squirrel-warehouse-guest-session";
 
 export function createAuthFlow({ fetchImpl = fetch, clock = () => Date.now(), guestStorage = browserGuestStorage() } = {}) {
-  let state = { status: "loading", email: "", user: null, csrfToken: "", retryUntil: 0, error: "" };
+  let state = { status: "loading", provider: 'email', email: "", user: null, csrfToken: "", retryUntil: 0, error: "" };
 
   const update = (patch) => (state = { ...state, ...patch });
   const call = async (path, options = {}) => {
@@ -17,6 +17,21 @@ export function createAuthFlow({ fetchImpl = fetch, clock = () => Date.now(), gu
 
   return {
     getState: () => ({ ...state, retryAfterSeconds: Math.max(0, Math.ceil((state.retryUntil - clock()) / 1000)) }),
+    async loadProvider() {
+      try {
+        const payload = await call('/api/auth/config');
+        if (!['github', 'email'].includes(payload.provider)) throw new Error('登录配置暂时不可用，请刷新后重试');
+        return update({ provider: payload.provider });
+      } catch (error) {
+        update({ provider: 'unavailable', status: 'email', error: '登录服务暂时不可用，请刷新后重试' });
+        throw error;
+      }
+    },
+    startGithub() {
+      if (state.provider !== 'github') throw new Error('GitHub 登录暂时不可用');
+      guestStorage?.removeItem(GUEST_SESSION_KEY);
+      return '/api/auth/github';
+    },
     hydrate({ user, csrfToken = "" }) {
       return update({ status: "authenticated", user, csrfToken, error: "" });
     },

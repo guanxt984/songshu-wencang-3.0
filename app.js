@@ -2,6 +2,7 @@ import { applyDocumentEdit, applyPineconeEdits, BUILT_IN_WAREHOUSE_AVATARS, canS
 import { EXAMPLE_COLLECTION_VERSION, exampleWarehouses } from "./example-warehouses.js";
 import { organizeWarehouseLocally } from "./organizer.js";
 import { createAuthFlow } from "./auth-flow.js";
+import { createCloudWarehouseStore, removePineconeReferences } from "./cloud-warehouse-store.js";
 
 const STORAGE_KEY = "squirrel-warehouse-mvp";
 const USE_API_ORGANIZER = false;
@@ -166,6 +167,10 @@ const initialState = {
 let state = null;
 const authFlow = createAuthFlow();
 let authState = authFlow.getState();
+let cloudStore = null;
+let cloudStatus = { status: "idle", error: "" };
+let cloudAccount = "";
+let cloudSaveScheduled = false;
 const app = document.querySelector("#app");
 const toast = document.querySelector("#toast");
 let draggedWarehouseId = "";
@@ -179,13 +184,80 @@ bootstrapAuth();
 async function bootstrapAuth() {
   render();
   try {
+    await authFlow.loadProvider();
     authState = await authFlow.restore();
   } catch {
     authState = authFlow.getState();
   }
-  if (authState.status === "authenticated") state = loadState(authState.user.id);
+  if (new URLSearchParams(window.location.search).get('login') === 'failed') {
+    authState = { ...authState, error: 'GitHub 登录未完成，请重试。' };
+  }
+  if (new URLSearchParams(window.location.search).has('login')) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('login');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  }
   render();
 }
+
+function cloudState(records) {
+  let next = normalizeWarehouseState({ ...initialState, warehouses: [] }, initialState.version);
+  for (const record of records) next = persistWarehouseRecord(next, record);
+  next.warehouses.order = records.map((record) => record.id);
+  next.activeWarehouseId = records.some((item) => item.id === state?.activeWarehouseId) ? state.activeWarehouseId : records[0]?.id || "";
+  return resetTransientState(next);
+}
+
+async function loadCloudAccount() {
+  const account = authState.user.id;
+  cloudAccount = account;
+  cloudStore = createCloudWarehouseStore({ userId: account, csrfToken: authState.csrfToken, onStatus: (status) => { cloudStatus = status; renderCloudStatus(); } });
+  const store = cloudStore;
+  try { const records = await store.load(); if (store === cloudStore) state = cloudState(records); }
+  catch { if (store === cloudStore) state = cloudState([]); }
+  if (store === cloudStore) render();
+}
+
+function renderCloudStatus() {
+  document.querySelector("#cloud-status")?.remove();
+  if (!cloudStore || authState.user?.isGuest) return;
+  const panel = document.createElement('div'); panel.id = 'cloud-status';
+  const blocked = ['loading', 'saving', 'error'].includes(cloudStatus.status);
+  panel.className = blocked ? 'cloud-status cloud-blocked' : 'cloud-status';
+  panel.innerHTML = `<span>${escapeHtml(cloudStatus.error || ({ loading: '正在读取云端资料…', saving: '正在保存到云端…', saved: '已保存到云端' }[cloudStatus.status] || ''))}</span>${cloudStatus.status === 'error' ? '<button data-cloud="retry">重试</button><button data-cloud="export">导出本地副本</button><button data-cloud="reload">重新载入云端</button>' : ''}${cloudStatus.status === 'saved' && state && !getWarehouseList().length ? '<button data-cloud="import">导入本机资料</button>' : ''}`;
+  document.body.append(panel);
+  if (cloudStore.getRecovery()) {
+    const backupButton = document.createElement('button'); backupButton.textContent = '导出恢复备份';
+    backupButton.addEventListener('click', () => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(cloudStore.getRecovery(), null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a'); link.href = url; link.download = '松鼠仓恢复备份.json'; link.click(); URL.revokeObjectURL(url);
+    });
+    panel.append(backupButton);
+  }
+  panel.querySelector('[data-cloud="export"]')?.addEventListener('click', () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ state, pendingTasks: cloudStore.getPendingBackups() }, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = '松鼠仓本地副本.json'; link.click(); URL.revokeObjectURL(url);
+  });
+  for (const action of ['retry', 'reload', 'import']) panel.querySelector(`[data-cloud="${action}"]`)?.addEventListener('click', async () => {
+    if (action === 'reload' && panel.dataset.reloadConfirmed !== 'yes') { panel.dataset.reloadConfirmed = 'yes'; panel.querySelector('[data-cloud="reload"]').textContent = '确认备份本地修改并载入云端'; return; }
+    const store = cloudStore;
+    try {
+      let result;
+      if (action === 'import') {
+        const raw = localStorage.getItem(accountStorageKey(authState.user.id)) || localStorage.getItem(accountStorageKey('guest')) || localStorage.getItem(STORAGE_KEY);
+        if (!raw) throw new Error('本机没有可导入的资料');
+        const records = getWarehouseRecords(normalizeWarehouseState(JSON.parse(raw), initialState.version));
+        if (!records.length) throw new Error('本机没有可导入的松鼠仓');
+        result = await store.importRecords(records);
+      } else result = await (action === 'retry' ? store.retry() : store.discardAndReload());
+      if (store === cloudStore) { state = cloudState(result); render(); }
+    } catch (error) { if (store === cloudStore) { cloudStatus = { status: 'error', error: error.message }; renderCloudStatus(); } }
+  });
+}
+
+for (const eventName of ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'change', 'drop']) document.addEventListener(eventName, (event) => {
+  if (cloudStore && ['loading', 'saving', 'error'].includes(cloudStatus.status) && !event.target.closest('#cloud-status') && !event.target.closest('[data-auth-action]')) { event.preventDefault(); event.stopImmediatePropagation(); }
+}, true);
 
 function makeWarehouse(id, name, updatedAt, contents) {
   const pinecones = contents.map((content, index) => ({
@@ -227,11 +299,12 @@ function loadState(userId) {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
     const normalized = normalizeWarehouseState(saved || initialState, initialState.version);
-    const migrated = useOnlyExampleWarehouses(normalized, exampleWarehouses, EXAMPLE_COLLECTION_VERSION);
+    const migrated = saved ? normalized : useOnlyExampleWarehouses(normalized, exampleWarehouses, EXAMPLE_COLLECTION_VERSION);
     localStorage.setItem(storageKey, JSON.stringify(migrated));
     return resetTransientState(migrated);
   } catch {
-    localStorage.removeItem(storageKey);
+    // Keep the original bytes available for recovery when local data cannot be decoded.
+    return resetTransientState(normalizeWarehouseState(initialState, initialState.version));
   }
 
   const normalized = normalizeWarehouseState(initialState, initialState.version);
@@ -256,6 +329,19 @@ function resetTransientState(nextState) {
 }
 
 function saveState() {
+  if (cloudStore && !authState.user?.isGuest) {
+    if (cloudSaveScheduled) return;
+    cloudSaveScheduled = true;
+    const store = cloudStore;
+    cloudStatus = { status: 'saving', error: '' }; renderCloudStatus();
+    Promise.resolve().then(() => { cloudSaveScheduled = false; if (store !== cloudStore) return null; return store.save(getWarehouseList()); }).then((records) => {
+      if (store !== cloudStore) return;
+      const next = cloudState(records);
+      state = { ...state, warehouses: next.warehouses, documents: next.documents, shelves: next.shelves, pinecones: next.pinecones, activeWarehouseId: next.activeWarehouseId };
+      render();
+    }).catch((error) => { if (store === cloudStore) { cloudStatus = { status: 'error', error: error.message }; renderCloudStatus(); } });
+    return;
+  }
   const {
     toast: _toast,
     referenceIds: _referenceIds,
@@ -290,6 +376,8 @@ function isActiveWarehouseOrganizing() {
 }
 
 function renderAuthGate() {
+  const githubLogin = authState.provider === 'github';
+  const unavailable = authState.provider === 'unavailable';
   const isCodeStep = ["code", "verifying"].includes(authState.status);
   const isBusy = ["loading", "sending", "verifying"].includes(authState.status);
   return `
@@ -300,9 +388,13 @@ function renderAuthGate() {
       </div>
       <main class="auth-card" aria-busy="${isBusy}">
         <span class="auth-eyebrow">公开测试版</span>
-        <h2>${authState.status === "loading" ? "正在确认登录状态" : isCodeStep ? "查收验证码" : "邮箱登录"}</h2>
-        <p class="auth-intro">${isCodeStep ? `验证码已发送至 <strong>${escapeHtml(authState.email)}</strong>` : "使用邮箱继续，你的松鼠仓将在登录后与账号关联。"}</p>
-        ${authState.status === "loading" ? '<div class="auth-skeleton" aria-label="加载中"></div>' : isCodeStep ? `
+        <h2>${authState.status === "loading" ? "正在确认登录状态" : githubLogin ? '登录松鼠文仓' : unavailable ? '暂时无法登录' : isCodeStep ? "查收验证码" : "邮箱登录"}</h2>
+        <p class="auth-intro">${githubLogin ? '使用 GitHub 账号继续，登录后可云端保存、跨设备访问你的松鼠仓。' : unavailable ? '可以稍后重试，或先以访客身份体验。' : isCodeStep ? (isLocalDevelopmentHost() ? '本机测试登录，请使用验证码 123456。' : `验证码已发送至 <strong>${escapeHtml(authState.email)}</strong>`) : "使用邮箱继续，你的松鼠仓将在登录后与账号关联。"}</p>
+        ${authState.status === "loading" ? '<div class="auth-skeleton" aria-label="加载中"></div>' : githubLogin || unavailable ? `
+          ${authState.error ? `<p class="auth-error" role="alert">${escapeHtml(authState.error)}</p>` : ''}
+          <button class="auth-primary" type="button" data-auth-action="${githubLogin ? 'github-login' : 'retry-login'}">${githubLogin ? '使用 GitHub 登录' : '重新连接'}</button>
+          ${githubLogin ? '<p class="auth-guest-note">仅用于识别账号，不请求代码仓库权限。</p>' : ''}
+        ` : isCodeStep ? `
           <form class="auth-form" data-auth-form="code">
             <label for="auth-code">6 位验证码</label>
             <input class="auth-field auth-code-field" id="auth-code" data-input="auth-code" data-auth-input="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required autofocus>
@@ -332,6 +424,10 @@ function renderAuthGate() {
 }
 
 function bindAuthEvents() {
+  document.querySelector('[data-auth-action="github-login"]')?.addEventListener('click', () => {
+    window.location.assign(authFlow.startGithub());
+  });
+  document.querySelector('[data-auth-action="retry-login"]')?.addEventListener('click', () => window.location.reload());
   scheduleResendCountdown();
   document.querySelector("[data-auth-form='email']")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -386,8 +482,8 @@ function scheduleResendCountdown() {
 }
 
 function renderAccountControl() {
-  const label = authState.user?.isGuest ? "游客" : authState.user?.email || "";
-  const actionLabel = authState.user?.isGuest ? "使用邮箱登录" : "退出登录";
+  const label = authState.user?.isGuest ? "游客" : authState.user?.displayName || authState.user?.email || "";
+  const actionLabel = authState.user?.isGuest ? "登录账号" : "退出登录";
   return `<div class="account-control"><span>${escapeHtml(label)}</span><button type="button" data-auth-action="logout">${actionLabel}</button></div>`;
 }
 
@@ -402,6 +498,8 @@ function render() {
     renderToast();
     return;
   }
+  if (!authState.user.isGuest && cloudAccount !== authState.user.id) { loadCloudAccount(); app.innerHTML = '<p>正在读取云端资料…</p>'; return; }
+  if (!state && !authState.user.isGuest) return;
   if (!state) state = loadState(authState.user.id);
   const warehouse = getActiveWarehouse();
   if (!warehouse) {
@@ -758,9 +856,12 @@ function renderShelfPinecone(pinecone) {
 }
 
 function bindEvents() {
+  renderCloudStatus();
   document.querySelector("[data-auth-action='logout']")?.addEventListener("click", async () => {
+    if (cloudStore && ['loading', 'saving'].includes(cloudStatus.status)) { showToast('正在保存，请稍后退出。'); return; }
     try {
       authState = await authFlow.logout();
+      cloudStore?.stop(); cloudStore = null; cloudAccount = ''; cloudSaveScheduled = false; document.querySelector('#cloud-status')?.remove();
       state = null;
       render();
     } catch (error) {
@@ -1190,6 +1291,8 @@ function deletePinecone(pineconeId) {
   if (!pinecone) return;
 
   warehouse.pinecones = warehouse.pinecones.filter((item) => item.id !== pineconeId);
+  warehouse.reviewDocument = removePineconeReferences(warehouse.reviewDocument, pineconeId);
+  warehouse.shelves = removePineconeReferences(warehouse.shelves, pineconeId);
   warehouse.updatedAt = nowText();
   commitWarehouse(warehouse);
   saveState();
@@ -1269,13 +1372,25 @@ function readWarehouseAvatarFile(file) {
 
   return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.addEventListener("load", () => {
+    reader.addEventListener("load", async () => {
       if (state.warehouseDialog?.type !== "create" || !isWarehouseAvatarSource(reader.result)) {
         showToast("无法读取这张图片，请更换后重试。");
         resolve(false);
         return;
       }
-      state.warehouseDialog.customAvatar = reader.result;
+      let avatar = reader.result;
+      if (avatar.length > 700000) {
+        try {
+          const image = new Image(); image.src = avatar; await image.decode();
+          const scale = Math.min(1, 512 / Math.max(image.width, image.height));
+          const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale));
+          canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+          avatar = canvas.toDataURL('image/webp', 0.85);
+          if (avatar.length > 700000) throw new Error('图片过大');
+        } catch { showToast('图片压缩失败，请选择较小的图片。'); resolve(false); return; }
+      }
+      if (state.warehouseDialog?.type !== 'create') { resolve(false); return; }
+      state.warehouseDialog.customAvatar = avatar;
       render();
       resolve(true);
     });

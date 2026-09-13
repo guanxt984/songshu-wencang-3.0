@@ -8,6 +8,7 @@
   "properties": {
     "schema_version": { "const": 1 },
     "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "avatar": { "type": "string", "maxLength": 700000, "pattern": "^(squirrel-library-warehouse-logo\\.png|squirrel-warehouse-logo-simple\\.png|achang-doc\\.png|achang-wave\\.png|decor-pinecone-doc\\.png|pinecone-warehouse-icon\\.png|warehouse-icon-human-nature\\.png|warehouse-icon-product-manager\\.png|data:image/(png|jpeg|webp);base64,[a-zA-Z0-9+/]+={0,2})$" },
     "document": { "type": "object" },
     "shelves": { "type": "array" },
     "pinecones": { "type": "array" }

@@ -12,6 +12,19 @@ const productionEnv = {
   ALLOWED_ORIGINS: "https://app.example.test, https://admin.example.test",
 };
 
+test('GitHub production starts without a mailer, advertises GitHub and disables email login', async () => {
+  const api = createProductionApi({ env: { ...productionEnv, AUTH_PROVIDER: 'github',
+    APP_ORIGIN: 'https://app.example.test', GITHUB_CLIENT_ID: 'client', GITHUB_CLIENT_SECRET: 'secret' }, PoolClass: FakePool });
+  try {
+    const config = await api.handle(new Request('https://app.example.test/api/auth/config'));
+    assert.deepEqual(await config.json(), { provider: 'github' });
+    for (const path of ['/api/auth/email-code', '/api/auth/verify']) {
+      const response = await api.handle(request(path, { body: { email: 'person@example.test', code: '123456' } }));
+      assert.equal(response.status, 404);
+    }
+  } finally { await api.close(); }
+});
+
 test("production configuration rejects missing required values without exposing them", () => {
   for (const key of ["DATABASE_URL", "AUTH_HASH_SECRET", "CSRF_TOKEN_SECRET", "ALLOWED_ORIGINS"]) {
     const env = { ...productionEnv, [key]: "" };

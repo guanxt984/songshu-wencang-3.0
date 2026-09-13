@@ -1,3 +1,5 @@
+import { BUILT_IN_WAREHOUSE_AVATARS } from "../warehouse-management.js";
+
 const MAX_PINECONES = 500;
 const MAX_PINECONE_CODE_POINTS = 4_000;
 const MAX_TOTAL_CODE_POINTS = 20_000;
@@ -22,11 +24,14 @@ const codePointLength = (value) => Array.from(value).length;
 
 export function validateWarehouseSnapshot(snapshot) {
   if (!isObject(snapshot)) return invalid("VALIDATION_FAILED");
-  const allowed = new Set(["schema_version", "name", "document", "shelves", "pinecones"]);
+  const allowed = new Set(["schema_version", "name", "document", "shelves", "pinecones", "avatar"]);
   if (Object.keys(snapshot).some((key) => !allowed.has(key))) return invalid("VALIDATION_FAILED");
   if (snapshot.schema_version !== 1 || typeof snapshot.name !== "string" || !snapshot.name.trim()) return invalid("VALIDATION_FAILED");
   if (!isObject(snapshot.document) || !Array.isArray(snapshot.shelves) || !Array.isArray(snapshot.pinecones)) return invalid("VALIDATION_FAILED");
-  if (snapshot.name.length > 120 || snapshot.shelves.length > MAX_SHELVES || snapshot.pinecones.length > MAX_PINECONES || !hasBoundedShape(snapshot)) return invalid("VALIDATION_FAILED");
+  if (snapshot.avatar !== undefined && (typeof snapshot.avatar !== "string" || snapshot.avatar.length > 700_000 ||
+    !(BUILT_IN_WAREHOUSE_AVATARS.includes(snapshot.avatar) || /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/]+={0,2}$/i.test(snapshot.avatar)))) return invalid("VALIDATION_FAILED");
+  const { avatar: _avatar, ...content } = snapshot;
+  if (snapshot.name.length > 120 || snapshot.shelves.length > MAX_SHELVES || snapshot.pinecones.length > MAX_PINECONES || !hasBoundedShape(content)) return invalid("VALIDATION_FAILED");
   const shelfIds = new Set();
   for (const shelf of snapshot.shelves) {
     if (!isObject(shelf) || typeof shelf.id !== "string" || !shelf.id || shelfIds.has(shelf.id)) return invalid("VALIDATION_FAILED");

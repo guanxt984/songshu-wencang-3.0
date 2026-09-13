@@ -18,6 +18,7 @@ const PUBLIC_ROOT_FILES = new Set([
   "styles.css",
   "app.js",
   "auth-flow.js",
+  "cloud-warehouse-store.js",
   "organizer.js",
   "warehouse-management.js",
   "example-warehouses.js",
@@ -137,12 +138,14 @@ export function registerGracefulShutdown(options) {
 export async function startServer({ env = process.env, mailer, root = process.cwd() } = {}) {
   const port = Number(env.PORT || 5173);
   const composition = selectApiComposition({ env, port, mailer });
-  return startConfiguredServer({ composition, port, root });
+  const host = env.HOST || (readAppEnvironment(env.APP_ENV) === 'production' ? '0.0.0.0' : '127.0.0.1');
+  return startConfiguredServer({ composition, port, root, host });
 }
 
 export async function startConfiguredServer({
   composition,
   port,
+  host = '127.0.0.1',
   root = process.cwd(),
   createApplicationServerFactory = createApplicationServer,
   listenServer = listen,
@@ -160,7 +163,7 @@ export async function startConfiguredServer({
   let server;
   try {
     server = createApplicationServerFactory({ apiHandler: composition.handle, root });
-    await listenServer(server, port);
+    await listenServer(server, port, host);
   } catch {
     await closeQuietly(composition);
     throw new Error("API_STARTUP_FAILED");
@@ -205,10 +208,10 @@ function closeServer(server) {
   });
 }
 
-function listen(server, port) {
+function listen(server, port, host) {
   return new Promise((resolveListen, rejectListen) => {
     server.once("error", rejectListen);
-    server.listen(port, "127.0.0.1", resolveListen);
+    server.listen(port, host, resolveListen);
   });
 }
 

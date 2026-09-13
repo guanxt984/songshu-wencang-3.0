@@ -12,6 +12,16 @@ import * as serverModule from "./server.mjs";
 
 const { createGracefulShutdown, selectApiComposition } = serverModule;
 
+test('production startup can bind the external interface required by the hosting platform', async () => {
+  let receivedHost;
+  await serverModule.startConfiguredServer({ composition: { handle: async () => new Response() }, port: 10000,
+    host: '0.0.0.0', createApplicationServerFactory: () => ({}),
+    listenServer: async (_server, _port, host) => { receivedHost = host; },
+    registerGracefulShutdownFactory: () => () => {}, log: () => {},
+  });
+  assert.equal(receivedHost, '0.0.0.0');
+});
+
 test("server preserves the peer socket address on the internal API request", async (t) => {
   let receivedAddress;
   const server = serverModule.createApplicationServer({

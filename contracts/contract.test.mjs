@@ -26,6 +26,17 @@ test("warehouse snapshot accepts only the version 1 client content shape", () =>
   }).ok, false);
 });
 
+test("warehouse avatars allow built-ins and bounded raster data but reject executable sources", () => {
+  const snapshot = { schema_version: 1, name: "头像", document: {}, shelves: [], pinecones: [] };
+  for (const avatar of ["pinecone-warehouse-icon.png", "data:image/webp;base64," + "A".repeat(24000)]) {
+    assert.equal(validateWarehouseSnapshot({ ...snapshot, avatar }).ok, true);
+  }
+  for (const avatar of ["https://example.com/a.png", "javascript:alert(1)", "data:image/svg+xml;base64,AAAA", "data:image/png;base64," + "A".repeat(700000), {}, "../secret.png"]) {
+    assert.equal(validateWarehouseSnapshot({ ...snapshot, avatar }).ok, false);
+  }
+  assert.equal(validateWarehouseSnapshot({ ...snapshot, document: { text: "A".repeat(24000) } }).ok, false);
+});
+
 test("organize request enforces payload limits and result assigns each pinecone once", () => {
   assert.equal(validateOrganizeRequest({
     warehouseId: "w1",

@@ -3,6 +3,28 @@ import test from "node:test";
 
 import { createAuthFlow } from "./auth-flow.js";
 
+test('GitHub provider removes the guest marker before redirect and restores the server account', async () => {
+  const storage = new Map();
+  const flow = createAuthFlow({
+    guestStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
+    fetchImpl: async path => response(200, path.endsWith('/config') ? { provider: 'github' } : { user: { id: 'github-user', displayName: 'squirrel' }, csrfToken: 'csrf' }),
+  });
+  assert.equal(typeof flow.loadProvider, 'function');
+  await flow.loadProvider();
+  flow.enterGuest();
+  assert.equal(flow.startGithub(), '/api/auth/github');
+  assert.equal((await flow.restore()).user.id, 'github-user');
+  assert.equal(flow.getState().provider, 'github');
+});
+
+test('unavailable login configuration never falls back to a development email login', async () => {
+  const flow = createAuthFlow({ fetchImpl: async () => response(503, {}) });
+  assert.equal(typeof flow.loadProvider, 'function');
+  await assert.rejects(() => flow.loadProvider());
+  assert.equal(flow.getState().provider, 'unavailable');
+  assert.throws(() => flow.startGithub());
+});
+
 function response(status, body) {
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,

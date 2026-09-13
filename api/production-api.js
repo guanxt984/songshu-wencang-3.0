@@ -6,6 +6,8 @@ import { createPostgresAuthRepository } from "./postgres-auth-repository.js";
 import { createPostgresDatabase } from "./postgres-database.js";
 import { createPostgresWarehouseRepository } from "./postgres-warehouse-repository.js";
 import { createWarehouseService } from "./warehouse-service.js";
+import { createGithubOAuth } from "./github-oauth.js";
+import { createGithubRepository } from "./github-postgres.js";
 
 const LOCAL_VERIFICATION_CODE = "123456";
 
@@ -26,9 +28,17 @@ export function readProductionConfig(env = {}) {
 
 export function createProductionApi({ env = {}, PoolClass, mailer } = {}) {
   const config = readProductionConfig(env);
+  if (env.AUTH_PROVIDER && !['github', 'email'].includes(env.AUTH_PROVIDER)) throw new Error('PRODUCTION_CONFIG_INVALID');
+  const githubMode = env.AUTH_PROVIDER === 'github';
   const developmentVerification = config.appEnvironment === "development";
-  const configuredMailer = mailer || (developmentVerification ? localDevelopmentMailer : null);
+  const configuredMailer = githubMode ? { sendCode: async () => { throw new Error('EMAIL_DISABLED'); } } : mailer || (developmentVerification ? localDevelopmentMailer : null);
   if (!configuredMailer || typeof configuredMailer.sendCode !== "function") throw new Error("PRODUCTION_MAILER_REQUIRED");
+
+  // Validate OAuth and same-origin routing before opening a database pool.
+  if (githubMode) {
+    createGithubOAuth({ env });
+    if (!config.allowedOrigins.includes(env.APP_ORIGIN)) throw new Error('GITHUB_CONFIG_INVALID');
+  }
 
   const database = createPostgresDatabase({
     connectionString: env.DATABASE_URL,
@@ -38,21 +48,35 @@ export function createProductionApi({ env = {}, PoolClass, mailer } = {}) {
     repository: createPostgresAuthRepository({ database }),
     mailer: configuredMailer,
     secret: env.AUTH_HASH_SECRET,
-    ...(developmentVerification ? { randomInt: () => Number(LOCAL_VERIFICATION_CODE) } : {}),
+    ...(developmentVerification && !githubMode ? { randomInt: () => Number(LOCAL_VERIFICATION_CODE) } : {}),
   });
   const warehouseService = createWarehouseService({
     repository: createPostgresWarehouseRepository({ database }),
     idGenerator: () => randomUUID(),
   });
 
-  return {
-    handle: createApiHandler({
+  const github = githubMode ? createGithubOAuth({ env, repository: createGithubRepository({ database }) }) : null;
+  const apiHandler = createApiHandler({
       authService,
       warehouseService,
       allowedOrigins: config.allowedOrigins,
       secureCookies: config.appEnvironment === "production",
       resolveClientIp: resolveSocketClientIp,
-    }),
+    });
+  return {
+    async handle(request) {
+      const path = new URL(request.url).pathname;
+      let response;
+      if (path === '/api/auth/config' && request.method === 'GET') response = Response.json({ provider: githubMode ? 'github' : 'email' });
+      else if (path === '/api/health' && request.method === 'GET') {
+        try { await database.query('SELECT 1'); response = Response.json({ status: 'ok' }); }
+        catch { response = Response.json({ status: 'unavailable' }, { status: 503 }); }
+      } else if (github && ['/api/auth/github', '/api/auth/github/callback'].includes(path)) response = await github.handle(request);
+      else if (github && ['/api/auth/email-code', '/api/auth/verify'].includes(path)) response = new Response(null, { status: 404 });
+      else response = await apiHandler(request);
+      response.headers.set('cache-control', 'no-store');
+      return response;
+    },
     ready: () => database.query("SELECT 1"),
     close: () => database.close(),
   };

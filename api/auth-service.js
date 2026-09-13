@@ -86,7 +86,7 @@ export function createAuthService({ repository, mailer, clock = () => new Date()
       if (!user || user.status !== "active") return null;
       const expiresAt = new Date(Math.min(now.getTime() + 7 * DAY, session.absoluteExpiresAt.getTime()));
       await repository.touchSession(tokenHash, expiresAt);
-      return { userId: user.id, email: user.emailNormalized, expiresAt };
+      return { userId: user.id, email: user.displayName ? '' : user.emailNormalized, expiresAt, ...(user.displayName ? { displayName: user.displayName } : {}) };
     },
 
     async logout(sessionToken) {

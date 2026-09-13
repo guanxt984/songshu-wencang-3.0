@@ -2058,3 +2058,7 @@ img {
   border-color: rgba(154, 63, 39, 0.62);
   background: rgba(255, 238, 229, 0.72);
 }
+/* Cloud state stays outside modal dialogs so failed saves always remain recoverable. */
+.cloud-status { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10000; padding: 10px 16px; border: 1px solid #bd945e; background: #fff9ea; border-radius: 10px; box-shadow: 0 3px 15px #583a2020; max-width: 90vw; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cloud-status button { cursor: pointer; padding: 6px 10px; }
+.cloud-blocked { border-color: #a36a34; }

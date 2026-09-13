@@ -86,6 +86,7 @@ export function normalizeWarehouseState(source, version) {
       id: warehouse.id,
       name: warehouse.name || "未命名松鼠仓",
       updatedAt: warehouse.updatedAt || "",
+      ...(isWarehouseAvatarSource(warehouse.avatar) ? { avatar: warehouse.avatar } : {}),
     };
     order.push(warehouse.id);
     documentsByWarehouseId[warehouse.id] = structuredClone(reviewDocument || { title: warehouse.name || "未命名松鼠仓", sections: [] });
