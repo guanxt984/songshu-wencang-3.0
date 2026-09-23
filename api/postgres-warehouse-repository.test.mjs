@@ -162,12 +162,13 @@ test("save increments revision and synchronizes snapshot metadata with owner-sco
 });
 
 test("create locks the owner, checks capacity, appends a record and advances order in one transaction", async () => {
-  const { repository, database } = setup([owner, [{ count: "3" }], [{ ...row, position: 3, revision: 0, snapshot: record.snapshot }], [{ warehouse_order_revision: 5 }]]);
-  assert.deepEqual(await repository.create("user-id", record), { ...mapped, position: 3, revision: 0, snapshot: record.snapshot });
+  const { repository, database } = setup([owner, [{ count: "3" }], [{ position: 5 }], [{ ...row, position: 5, revision: 0, snapshot: record.snapshot }], [{ warehouse_order_revision: 5 }]]);
+  assert.deepEqual(await repository.create("user-id", record), { ...mapped, position: 5, revision: 0, snapshot: record.snapshot });
   assert.match(database.calls[0].text, /FROM users WHERE id = \$1 FOR UPDATE/);
-  assert.match(database.calls[1].text, /WHERE user_id = \$1/);
-  assert.deepEqual(database.calls[2].values, ["user-id", warehouseId, "产品资料", 3, 1, 0, "ready", null, JSON.stringify(record.snapshot), now, now]);
-  assert.match(database.calls[3].text, /warehouse_order_revision = warehouse_order_revision \+ 1 WHERE id = \$1/);
+  assert.match(database.calls[1].text, /WHERE user_id = \$1 AND official_template_key IS NULL/);
+  assert.match(database.calls[2].text, /max\(position\) \+ 1/);
+  assert.deepEqual(database.calls[3].values, ["user-id", warehouseId, "产品资料", 5, 1, 0, "ready", null, JSON.stringify(record.snapshot), now, now]);
+  assert.match(database.calls[4].text, /warehouse_order_revision = warehouse_order_revision \+ 1 WHERE id = \$1/);
   assertTransaction(database);
 });
 
@@ -264,17 +265,19 @@ for (const [count, records, code] of [[1, [record], "WAREHOUSE_NOT_EMPTY"], [0, 
 
 test("import inserts all records, advances order once and returns the persisted successful batch", async () => {
   const second = { ...record, id: "second-id" };
-  const { repository, database } = setup([owner, [], [{ count: 0 }], [row], [{ ...row, id: "second-id", position: 1 }], [{ warehouse_order_revision: 5 }], [batchRow]]);
+  const { repository, database } = setup([owner, [], [{ count: 0 }], [{ position: 2 }], [{ ...row, position: 2 }], [{ ...row, id: "second-id", position: 3 }], [{ warehouse_order_revision: 5 }], [batchRow]]);
   const result = await repository.importEmptyBatch("user-id", "batch-key", "fingerprint", [record, second], (stored) => {
-    assert.deepEqual(stored.map(({ id, position }) => ({ id, position })), [{ id: warehouseId, position: 0 }, { id: "second-id", position: 1 }]);
+    assert.deepEqual(stored.map(({ id, position }) => ({ id, position })), [{ id: warehouseId, position: 2 }, { id: "second-id", position: 3 }]);
     return batchRow.result;
   });
   assert.deepEqual(result, { fingerprint: "fingerprint", result: batchRow.result });
-  assert.equal(database.calls[3].values[3], 0);
-  assert.equal(database.calls[4].values[3], 1);
-  assert.match(database.calls[6].text, /INSERT INTO import_batches/);
-  assert.match(database.calls[6].text, /'succeeded'/);
-  assert.deepEqual(database.calls[6].values.slice(0, 4), ["user-id", "batch-key", "fingerprint", JSON.stringify(batchRow.result)]);
+  assert.match(database.calls[2].text, /WHERE user_id = \$1 AND official_template_key IS NULL/);
+  assert.match(database.calls[3].text, /max\(position\) \+ 1/);
+  assert.equal(database.calls[4].values[3], 2);
+  assert.equal(database.calls[5].values[3], 3);
+  assert.match(database.calls[7].text, /INSERT INTO import_batches/);
+  assert.match(database.calls[7].text, /'succeeded'/);
+  assert.deepEqual(database.calls[7].values.slice(0, 4), ["user-id", "batch-key", "fingerprint", JSON.stringify(batchRow.result)]);
   assertTransaction(database);
 });
 

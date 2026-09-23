@@ -174,3 +174,15 @@ const humanNature = buildExampleWarehouse({
 
 export const EXAMPLE_COLLECTION_VERSION = 2;
 export const exampleWarehouses = [productManager, humanNature];
+export const OFFICIAL_WAREHOUSE_SEED_VERSION = 2;
+export const officialWarehouseTemplates = exampleWarehouses.map((warehouse) => ({
+  key: warehouse.id,
+  snapshot: {
+    schema_version: 1,
+    name: warehouse.name,
+    document: structuredClone(warehouse.reviewDocument),
+    shelves: structuredClone(warehouse.shelves),
+    pinecones: structuredClone(warehouse.pinecones),
+    avatar: warehouse.avatar,
+  },
+}));

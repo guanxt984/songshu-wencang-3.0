@@ -65,7 +65,19 @@ export function createApplicationServer({ apiHandler, root = process.cwd() } = {
       response.end("Not found");
       return;
     }
-    response.writeHead(200, { "content-type": types[extname(filePath)] || "application/octet-stream" });
+    const fileStats = statSync(filePath);
+    const etag = `W/\"${fileStats.size.toString(16)}-${Math.trunc(fileStats.mtimeMs).toString(16)}\"`;
+    const headers = {
+      "content-type": types[extname(filePath)] || "application/octet-stream",
+      etag,
+      ...(url.pathname.startsWith("/assets/") ? { "cache-control": "public, max-age=86400" } : {}),
+    };
+    if (request.headers["if-none-match"] === etag) {
+      response.writeHead(304, headers);
+      response.end();
+      return;
+    }
+    response.writeHead(200, headers);
     createReadStream(filePath).pipe(response);
   });
   server.requestTimeout = 15_000;

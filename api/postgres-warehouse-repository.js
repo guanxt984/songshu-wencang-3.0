@@ -56,9 +56,9 @@ export function createPostgresWarehouseRepository({ database } = {}) {
     async create(userId, record) {
       return safe(async () => database.withTransaction(async (client) => {
         await lockOwner(client, userId);
-        const count = await client.query("SELECT count(*)::integer AS count FROM warehouses WHERE user_id = $1", [userId]);
+        const count = await client.query("SELECT count(*)::integer AS count FROM warehouses WHERE user_id = $1 AND official_template_key IS NULL", [userId]);
         if (number(count.rows[0]?.count) >= 10) throw repositoryError("WAREHOUSE_LIMIT_REACHED");
-        const position = number(count.rows[0]?.count);
+        const position = await nextPosition(client, userId);
         const inserted = await client.query(
           `INSERT INTO warehouses (user_id, id, name, position, schema_version, revision, status, active_ai_job_id, snapshot, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::timestamptz, $11::timestamptz)
@@ -175,12 +175,14 @@ export function createPostgresWarehouseRepository({ database } = {}) {
           if (batch.fingerprint !== fingerprint) throw repositoryError("VALIDATION_FAILED");
           return batch;
         }
-        const count = await client.query("SELECT count(*)::integer AS count FROM warehouses WHERE user_id = $1", [userId]);
+        const count = await client.query("SELECT count(*)::integer AS count FROM warehouses WHERE user_id = $1 AND official_template_key IS NULL", [userId]);
         if (number(count.rows[0]?.count) !== 0) throw repositoryError("WAREHOUSE_NOT_EMPTY");
         if (!Array.isArray(records) || records.length === 0) throw repositoryError("VALIDATION_FAILED");
         if (records.length > 10) throw repositoryError("WAREHOUSE_LIMIT_REACHED");
+        const firstPosition = await nextPosition(client, userId);
         const stored = [];
-        for (const [position, record] of records.entries()) {
+        for (const [offset, record] of records.entries()) {
+          const position = firstPosition + offset;
           const inserted = await client.query(
             `INSERT INTO warehouses (user_id, id, name, position, schema_version, revision, status, active_ai_job_id, snapshot, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::timestamptz, $11::timestamptz)
@@ -207,6 +209,14 @@ async function lockOwner(client, userId) {
   const result = await client.query("SELECT warehouse_order_revision FROM users WHERE id = $1 FOR UPDATE", [userId]);
   if (!result.rows[0]) throw repositoryError("AUTH_REQUIRED");
   return result.rows[0];
+}
+
+async function nextPosition(client, userId) {
+  const result = await client.query(
+    "SELECT COALESCE(max(position) + 1, 0)::integer AS position FROM warehouses WHERE user_id = $1",
+    [userId],
+  );
+  return number(result.rows[0]?.position);
 }
 
 async function advanceOrderRevision(client, userId) {

@@ -63,6 +63,22 @@ test("static server keeps the application shell, modules, assets, and SPA routes
   }
 });
 
+test("static assets return validators and reuse the browser cache", async (t) => {
+  const root = await createStaticFixture(t);
+  const server = serverModule.createApplicationServer({ apiHandler: async () => new Response("Not found", { status: 404 }), root });
+  await listenOnLoopback(server);
+  t.after(() => closeServer(server));
+
+  const first = await requestServer(server, "/assets/illustrations/logo.png");
+  assert.equal(first.status, 200);
+  assert.match(first.headers["cache-control"], /public/);
+  assert.match(first.headers.etag, /^W\//);
+
+  const cached = await requestServer(server, "/assets/illustrations/logo.png", { "if-none-match": first.headers.etag });
+  assert.equal(cached.status, 304);
+  assert.equal(cached.body, "");
+});
+
 test("static server denies private workspace files and traversal encodings", async (t) => {
   const root = await createStaticFixture(t);
   const server = serverModule.createApplicationServer({ apiHandler: async () => new Response("Not found", { status: 404 }), root });
@@ -262,12 +278,12 @@ async function createStaticFixture(t) {
   return root;
 }
 
-function requestServer(server, path) {
+function requestServer(server, path, headers = {}) {
   return new Promise((resolve, reject) => {
-    const request = httpRequest({ host: "127.0.0.1", port: server.address().port, path }, (response) => {
+    const request = httpRequest({ host: "127.0.0.1", port: server.address().port, path, headers }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+      response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks).toString("utf8") }));
     });
     request.on("error", reject);
     request.end();

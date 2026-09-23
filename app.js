@@ -17,8 +17,27 @@ const OFFICIAL_WAREHOUSE_AVATARS = {
   example_human_nature: "warehouse-icon-human-nature.png",
 };
 
-const asset = (name, className, alt = "") =>
-  `<img class="${className}" src="assets/illustrations/${name}" alt="${alt}" ${alt ? "" : 'aria-hidden="true"'}>`;
+const ASSET_DIMENSIONS = {
+  "squirrel-wencang-logo-ip.png": [256, 256],
+  "squirrel-crayon.png": [96, 85],
+  "pinecone-icon.png": [96, 96],
+  "leaf-crayon.png": [77, 96],
+  "book-crayon.png": [73, 96],
+  "star-crayon.png": [88, 96],
+  "search-crayon.png": [95, 96],
+  "user-crayon.png": [87, 96],
+  "plus-crayon.png": [91, 96],
+  "more-crayon.png": [95, 96],
+  "grass-crayon.png": [96, 92],
+  "pinecone-warehouse-icon.png": [96, 96],
+  "warehouse-icon-product-manager.png": [192, 192],
+  "warehouse-icon-human-nature.png": [192, 192],
+};
+
+const asset = (name, className, alt = "") => {
+  const [width, height] = ASSET_DIMENSIONS[name] || [96, 96];
+  return `<img class="${className}" src="assets/illustrations/${name}" width="${width}" height="${height}" alt="${alt}" ${alt ? "" : 'aria-hidden="true"'}>`;
+};
 
 const icons = {
   squirrel: (className) => asset("squirrel-crayon.png", className),
@@ -647,7 +666,7 @@ function renderToolbar() {
   const warehouse = getActiveWarehouse();
   const canOrganize = canStartWarehouseOrganization(state.organizingWarehouseId, warehouse);
   return `
-    <img class="document-mascot" src="assets/illustrations/squirrel-toolbar-perched-v2.png" alt="" aria-hidden="true">
+    <img class="document-mascot" src="assets/illustrations/squirrel-toolbar-perched-v2.png" width="600" height="245" alt="" aria-hidden="true">
     <nav class="document-corner-tools" aria-label="文档工具" data-toolbar>
       <button class="corner-tool" type="button" data-action="toggle-add" aria-label="添加松果" title="添加松果" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.plus("toolbar-img add")}</span><span class="corner-tool-label">添加松果</span></button>
       <button class="corner-tool" type="button" data-action="toggle-document-edit" aria-label="${state.editMode ? "保存文档" : "编辑文档"}" title="${state.editMode ? "保存文档" : "编辑文档"}" ${readOnly ? "disabled" : ""}><span class="toolbar-icon-box">${icons.book("toolbar-img")}</span><span class="corner-tool-label">${state.editMode ? "保存文档" : "编辑文档"}</span></button>
